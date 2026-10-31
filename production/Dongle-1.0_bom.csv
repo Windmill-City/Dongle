@@ -1,0 +1,9 @@
+﻿Designator,Footprint,Quantity,Value,LCSC Part #
+"C1, C2",0402,2,2.2u,
+D1,0402,1,LED,
+J1,USB_A_Plug_4P,1,USB_A_Plug,
+R1,0402,1,10k,
+R2,0402,1,1.5k,
+U1,DFN-10-1EP_3x3mm_P0.5mm_EP1.7x2.5mm,1,CH570Q,
+U2,ANT_IFA_Meander,1,ANT_IFA,
+Y1,Crystal_SMD_2016-4Pin_2.0x1.6mm,1,32M,
