@@ -1,20 +1,25 @@
 /*
  * CH570/CH572 startup and vector table.
  *
- * The .vector section is copied to the beginning of RAM by .highcode, so the
- * vector table can be used with the WCH fast interrupt mode (mtvec = base | 3).
+ * The core starts at flash address 0, which jumps to the reset handler.  The
+ * vector table is part of .highcode and is copied to RAM before mtvec is
+ * programmed, so the WCH fast interrupt mode (mtvec = base | 3) can be used.
  */
 
     .section .init, "ax", @progbits
     .global _start
-    .global _vector_base
-    .align 1
+    .type _start, @function
+    .balign 2
 _start:
-    j handle_reset
+    j .Lhandle_reset
+    .size _start, . - _start
 
     .section .vector, "ax", @progbits
-    .align 1
+    .balign 4
+    .global _vector_base
+    .type _vector_base, @object
 _vector_base:
+    .option push
     .option norvc
 
     .word 0
@@ -55,7 +60,8 @@ _vector_base:
     .word ENCODER_IRQHandler
     .word WDOG_BAT_IRQHandler
 
-    .option rvc
+    .option pop
+    .size _vector_base, . - _vector_base
 
     .section .vector_handler, "ax", @progbits
 
@@ -102,56 +108,55 @@ PWMX_IRQHandler:
 KEYSCAN_IRQHandler:
 ENCODER_IRQHandler:
 WDOG_BAT_IRQHandler:
-1:
-    j 1b
+.Ldefault_handler:
+    j .Ldefault_handler
 
     .section .handle_reset, "ax", @progbits
-    .weak handle_reset
-    .align 1
-handle_reset:
+    .balign 4
+.Lhandle_reset:
     .option push
     .option norelax
     la gp, __global_pointer$
-1:
     la sp, _eusrstack
     .option pop
 
     /* Copy .highcode from flash to RAM. */
-2:
     la a0, _highcode_lma
     la a1, _highcode_vma_start
     la a2, _highcode_vma_end
-    bgeu a1, a2, 2f
-1:
-    lw t0, (a0)
-    sw t0, (a1)
+    bgeu a1, a2, .Lcopy_highcode_done
+.Lcopy_highcode_loop:
+    lw t0, 0(a0)
+    sw t0, 0(a1)
     addi a0, a0, 4
     addi a1, a1, 4
-    bltu a1, a2, 1b
-2:
+    bltu a1, a2, .Lcopy_highcode_loop
+.Lcopy_highcode_done:
 
     /* Copy .data from flash to RAM. */
     la a0, _data_lma
     la a1, _data_vma
     la a2, _edata
-    bgeu a1, a2, 2f
-1:
-    lw t0, (a0)
-    sw t0, (a1)
+    bgeu a1, a2, .Lcopy_data_done
+.Lcopy_data_loop:
+    lw t0, 0(a0)
+    sw t0, 0(a1)
     addi a0, a0, 4
     addi a1, a1, 4
-    bltu a1, a2, 1b
-2:
+    bltu a1, a2, .Lcopy_data_loop
+.Lcopy_data_done:
 
     /* Clear .bss. */
     la a0, _sbss
     la a1, _ebss
-    bgeu a0, a1, 2f
-1:
-    sw zero, (a0)
+    bgeu a0, a1, .Lclear_bss_done
+.Lclear_bss_loop:
+    sw zero, 0(a0)
     addi a0, a0, 4
-    bltu a0, a1, 1b
-2:
+    bltu a0, a1, .Lclear_bss_loop
+.Lclear_bss_done:
+
+    fence.i
 
     li t0, 0x25
     csrw 0xbc0, t0
@@ -159,12 +164,33 @@ handle_reset:
     csrw 0x804, t0
     li t0, 0x1
     csrw 0xbc1, t0
-    li t0, 0x88
-    csrw mstatus, t0
 
     la t0, _vector_base
     ori t0, t0, 3
     csrw mtvec, t0
+
+    la s0, __preinit_array_start
+    la s1, __preinit_array_end
+    bgeu s0, s1, .Lpreinit_done
+.Lpreinit_loop:
+    lw t0, 0(s0)
+    jalr ra, t0, 0
+    addi s0, s0, 4
+    bltu s0, s1, .Lpreinit_loop
+.Lpreinit_done:
+
+    la s0, __init_array_start
+    la s1, __init_array_end
+    bgeu s0, s1, .Linit_done
+.Linit_loop:
+    lw t0, 0(s0)
+    jalr ra, t0, 0
+    addi s0, s0, 4
+    bltu s0, s1, .Linit_loop
+.Linit_done:
+
+    li t0, 0x88
+    csrw mstatus, t0
 
     la t0, main
     csrw mepc, t0
