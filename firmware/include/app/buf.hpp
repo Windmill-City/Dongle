@@ -1,5 +1,4 @@
-#ifndef BUF_HPP
-#define BUF_HPP
+#pragma once
 
 #include <stdint.h>
 #include "common.hpp"
@@ -25,5 +24,3 @@ private:
     uint16_t m_rd;
     volatile uint16_t m_count;
 };
-
-#endif

@@ -1,5 +1,4 @@
-#ifndef RF_UART_RX_HPP
-#define RF_UART_RX_HPP
+#pragma once
 
 #include <stdint.h>
 #include <ch572rf.hpp>
@@ -46,5 +45,3 @@ private:
     uint8_t m_bound_status;
     uint8_t m_rx_data_status;
 };
-
-#endif

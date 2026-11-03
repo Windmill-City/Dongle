@@ -1,5 +1,4 @@
-#ifndef __CORE_RISCV_HPP__
-#define __CORE_RISCV_HPP__
+#pragma once
 
 #include <stdint.h>
 #include <sfr.hpp>
@@ -386,5 +385,3 @@ RV_STATIC_INLINE uint32_t __SysTick_Config(uint32_t ticks)
                     SysTick_CTLR_STE;
     return (0);
 }
-
-#endif

@@ -1,5 +1,4 @@
-#ifndef __CH57X_TIMER_HPP__
-#define __CH57X_TIMER_HPP__
+#pragma once
 
 #include <stdint.h>
 #include "sfr.hpp"
@@ -18,5 +17,3 @@ inline void TMR_ITCfg(FunctionalState s, uint8_t f)
         R8_TMR_INTER_EN &= ~f;
     }
 }
-
-#endif

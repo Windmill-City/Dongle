@@ -1,5 +1,4 @@
-#ifndef __ch57x_GPIO_HPP__
-#define __ch57x_GPIO_HPP__
+#pragma once
 
 #include <stdint.h>
 #include "sfr.hpp"
@@ -43,5 +42,3 @@ void GPIOA_ModeCfg(uint32_t pin, GPIOModeTypeDef mode);
 
 inline void GPIOA_ResetBits(uint32_t pin) { R32_PA_CLR = pin; }
 inline void GPIOA_SetBits(uint32_t pin) { R32_PA_SET = pin; }
-
-#endif

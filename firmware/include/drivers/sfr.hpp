@@ -1,5 +1,4 @@
-#ifndef __BASE_TYPE__
-#define __BASE_TYPE__
+#pragma once
 
 #include <stdint.h>
 
@@ -40,9 +39,7 @@ using PUINT16V = volatile uint16_t *;
 using PUINT32V = volatile uint32_t *;
 using PUINT64V = volatile uint64_t *;
 
-#endif
-#ifndef __SFR_HPP__
-#define __SFR_HPP__
+
 
 #define R32_IWDG_KR         (*((PUINT32V)0x40001000))
 #define R32_IWDG_CFG        (*((PUINT32V)0x40001004))
@@ -820,10 +817,7 @@ enum IRQn {
 using IRQn_Type = IRQn;
 #endif
 
-#endif
 
-#ifndef __USB_SFR_HPP__
-#define __USB_SFR_HPP__
 
 #define USB_BASE_ADDR              (0x40008000)
 #define BA_USB              ((PUINT8V)0x40008000)
@@ -1019,10 +1013,7 @@ using IRQn_Type = IRQn;
 #define R8_UEP7_T_LEN       (*((PUINT8V)0x4000806C))
 #define R8_UEP7_CTRL        (*((PUINT8V)0x4000806E))
 
-#endif
 
-#ifndef __USB_TYPE__
-#define __USB_TYPE__
 
 #ifndef USB_PID_SETUP
 #define USB_PID_NULL            0x00
@@ -1291,5 +1282,3 @@ typedef struct __PACKED  _UDISK_BOC_CSW {
 } UDISK_BOC_CSW, *PUDISK_BOC_CSW;
 
 typedef UDISK_BOC_CSW  *PXUDISK_BOC_CSW;
-
-#endif

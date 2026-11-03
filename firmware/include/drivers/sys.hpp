@@ -1,5 +1,4 @@
-#ifndef __ch57x_SYS_HPP__
-#define __ch57x_SYS_HPP__
+#pragma once
 
 #include <stdint.h>
 #include "sfr.hpp"
@@ -16,5 +15,3 @@ uint32_t SYS_GetSysTickCnt(void);
                                         R8_SAFE_ACCESS_SIG = SAFE_ACCESS_SIG1;R8_SAFE_ACCESS_SIG = SAFE_ACCESS_SIG2;SAFEOPERATE;
 
 #define sys_safe_access_disable()       R8_SAFE_ACCESS_SIG = 0;__risc_v_enable_irq(mpie_mie);SAFEOPERATE;}while(0)
-
-#endif

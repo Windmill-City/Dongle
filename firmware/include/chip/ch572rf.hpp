@@ -1,5 +1,4 @@
-#ifndef __CH572_RF_HPP__
-#define __CH572_RF_HPP__
+#pragma once
 
 #include <stdint.h>
 
@@ -169,7 +168,5 @@ bStatus_t RFRole_BasicInit(rfRoleConfig_t *pConf);
 
 bStatus_t RFIP_StartTx(rfipTx_t *pParm);
 
-bStatus_t RFIP_SetRx(rfipRx_t *pParm);
+    bStatus_t RFIP_SetRx(rfipRx_t *pParm);
 }
-
-#endif

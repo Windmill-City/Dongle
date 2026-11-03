@@ -1,5 +1,4 @@
-#ifndef __ch57x_COMM_HPP__
-#define __ch57x_COMM_HPP__
+#pragma once
 
 #include <stdint.h>
 #include <string.h>
@@ -36,5 +35,3 @@
 #include "timer.hpp"
 
 inline constexpr uint16_t ALL = 0xFFFF;
-
-#endif

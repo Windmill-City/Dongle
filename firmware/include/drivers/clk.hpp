@@ -1,5 +1,4 @@
-#ifndef __ch57x_CLK_HPP__
-#define __ch57x_CLK_HPP__
+#pragma once
 
 #include <stdint.h>
 
@@ -38,5 +37,3 @@ enum HSECapTypeDef : uint8_t
 };
 
 void HSECFG_Capacitance(HSECapTypeDef c);
-
-#endif

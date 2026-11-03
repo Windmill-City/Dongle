@@ -1,5 +1,4 @@
-#ifndef RF_HPP
-#define RF_HPP
+#pragma once
 
 #include <stdint.h>
 #include <ch572rf.hpp>
@@ -146,6 +145,4 @@ private:
     rf_status_cbs_t *m_cbs;
     uint8_t m_rx_buf[264] __attribute__((aligned(4)));
 };
-
-#endif
 

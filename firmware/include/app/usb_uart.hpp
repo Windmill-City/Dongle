@@ -1,5 +1,4 @@
-#ifndef USB_UART_HPP
-#define USB_UART_HPP
+#pragma once
 
 #include <stdint.h>
 #include "common.hpp"
@@ -84,5 +83,3 @@ private:
 
     ByteBuf<USB_BUF_LEN> m_buf;
 };
-
-#endif
