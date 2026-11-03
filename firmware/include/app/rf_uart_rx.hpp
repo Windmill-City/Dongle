@@ -11,7 +11,7 @@
 
 #define CONN_INTERVAL    10
 #define CONN_TIMEOUT     100
-#define CONN_PHY_TYPE    1
+#define CONN_PHY_TYPE    (TEST_PHY_MODE >> 4)
 
 class RfUart
 {

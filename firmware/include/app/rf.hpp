@@ -8,61 +8,10 @@
 #define DEF_FREQUENCY   17
 #define TEST_PHY_MODE   PHY_MODE_PHY_2M
 
-#if (TEST_PHY_MODE == PHY_MODE_2G4)
-
-#if (PHY_2G4_MODE == 0)
-#define AA            0x94826E8E
-#define AA_EX         0
-#define AA_LEN        1
-#define PRE_LEN       1
-#define CRC_INIT      0xFFFF
-#define CRC_POLY      0x8810
-#define CRC_LEN       2
-#define CTL_FILED     0
-#define DPL_EN        0
-#define DATA_ORDER    0
-#define MODE_2G4      PHY_2G4_1M
-#define CRC_XOR_EN    0
-
-#elif (PHY_2G4_MODE == 1)
-#define PKT_DET_CFG4(var)     { (*((PUINT32V)0x4000C120)) = var; }
-#define AA            0x94826E8E
-#define AA_EX         0
-#define AA_LEN        1
-#define PRE_LEN       1
-#define CRC_INIT      0xFFFF
-#define CRC_POLY      0x8810
-#define CRC_LEN       2
-#define CTL_FILED     0
-#define DPL_EN        0
-#define DATA_ORDER    0
-#define MODE_2G4      PHY_2G4_1M
-#define CRC_XOR_EN    0
-
-#elif (PHY_2G4_MODE == 2)
-#define AA            0x94826E8E
-#define AA_EX         0
-#define AA_LEN        1
-#define PRE_LEN       1
-#define CRC_INIT      0xFFFF
-#define CRC_POLY      0x8810
-#define CRC_LEN       2
-#define CTL_FILED     0
-#define DPL_EN        0
-#define DATA_ORDER    1
-#define MODE_2G4      PHY_2G4_1M
-#define CRC_XOR_EN    1
-
-#endif
-
-#else
-
 #define AA            0x57250425
 #define AA_EX         0
 #define CRC_INIT      0x555555
 #define CRC_POLY      0x80032d
-
-#endif
 
 typedef struct
 {
@@ -199,3 +148,4 @@ private:
 };
 
 #endif
+

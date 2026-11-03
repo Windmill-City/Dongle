@@ -32,6 +32,7 @@ CXX_SOURCES   := $(wildcard src/*.cpp src/app/*.cpp src/drivers/*.cpp)
 ASM_SOURCES   := $(wildcard *.s)
 OBJECTS       := $(patsubst src/%.cpp,$(BUILD)/%.o,$(CXX_SOURCES)) \
                  $(patsubst %.s,$(BUILD)/%.o,$(ASM_SOURCES))
+DEPS          := $(OBJECTS:.o=.d)
 
 ifeq ($(OS),Windows_NT)
 SHELL         := cmd.exe
@@ -57,11 +58,13 @@ $(BUILD)/$(TARGET).hex: $(BUILD)/$(TARGET).elf
 
 $(BUILD)/%.o: src/%.cpp
 	@$(call MKDIR_P,$(dir $@))
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -MMD -MP -c $< -o $@
 
 $(BUILD)/%.o: %.s
 	@$(call MKDIR_P,$(dir $@))
 	$(CXX) $(ASFLAGS) $(INCLUDES) -c $< -o $@
+
+-include $(DEPS)
 
 clean:
 	@$(call RM_RF,$(BUILD))
