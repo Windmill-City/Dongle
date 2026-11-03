@@ -38,15 +38,6 @@
 #include "ch57x_gpio.h"
 #include "ch57x_sys.h"
 #include "ch57x_timer.h"
-#include "ch57x_usbdev.h"
-#include "isp572.h"
-
- extern uint32_t Freq_LSI;
-
-#define DelayMs(x)      mDelaymS(x)
-#define DelayUs(x)      mDelayuS(x)
-
-#define ROM_CFG_VERISON    0x7F010
 
 #ifdef __cplusplus
 }

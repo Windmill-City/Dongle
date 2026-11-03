@@ -88,7 +88,6 @@ typedef struct
 
 enum data_status
 {
-    DATA_STATUS_IDLE,
     DATA_STATUS_START,
     DATA_STATUS_RCV,
     DATA_STATUS_TIMEOUT,
@@ -103,26 +102,11 @@ enum bound_status
 
 enum rf_status
 {
-    RF_STATUS_IDLE,
-    RF_STATUS_REQ,
-    RF_STATUS_GETS,
     RF_STATUS_WAIT,
     RF_STATUS_RX,
     RF_STATUS_TX,
-    RF_STATUS_WAITRSP,
     RF_STATUS_TXRSP,
-    RF_STATUS_TXACK,
-    RF_STATUS_RETX,
-    RF_STATUS_REWAIT,
 };
-
-typedef struct
-{
-    uint8_t tx_buf[BUF_LEN_TX];
-    buf_size_t len;
-    uint8_t status;
-    uint8_t resend_count;
-} rf_tx_buf_t;
 
 typedef struct __attribute__((packed))
 {
@@ -156,10 +140,16 @@ typedef struct __attribute__((packed))
 
         struct
         {
-            uint8_t data[BUF_LEN_TX];
+            uint8_t data[DATA_LEN_MAX_TX];
         } payload;
     };
 } rf_rsp_t;
+
+typedef struct
+{
+    rf_packet_t packet;
+    rf_rsp_t rsp;
+} rf_tx_buf_t;
 
 #define PKT_CMD_BOUND_REQ     0x01
 #define PKT_CMD_GET_STATUS    0x02

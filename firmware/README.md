@@ -26,12 +26,12 @@ firmware/
 │  └─ drivers/
 │     ├─ ch57x_clk.c         时钟
 │     ├─ ch57x_gpio.c        GPIO
-│     └─ ch57x_sys.c         系统与延时
+│     └─ ch57x_sys.c         系统时钟与启动
 ├─ include/
 │  ├─ app/                   应用头文件
 │  ├─ drivers/               外设库头文件
 │  └─ chip/                  ch572rf.h、core_riscv.h
-├─ lib/                      libch57x_rf.a、libisp572.a
+├─ lib/                      libch57x_rf.a
 └─ build/                    编译产物（不提交）
 ```
 

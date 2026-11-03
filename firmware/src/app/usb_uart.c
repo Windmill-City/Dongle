@@ -11,7 +11,7 @@
 
 #define CH341_REG_NUM         10
 
-#define USB_BUF_LEN           512
+#define USB_BUF_LEN           256
 
 #define USB_IRQ_FLAG_NUM      4
 
@@ -83,9 +83,27 @@ static const uint8_t usb_lang_str_desc[] =
     0x04, 0x03, 0x09, 0x04
 };
 
-static const uint8_t usb_manufacturer_str[] = "wch.cn";
-static const uint8_t usb_product_str[] = "USB2.0 To Serial Port";
-static const uint8_t usb_serial_str[] = "WCH454545TS2";
+static const uint8_t usb_manufacturer_str[] =
+{
+    0x0E, 0x03,
+    'w', 0x00, 'c', 0x00, 'h', 0x00, '.', 0x00, 'c', 0x00, 'n', 0x00
+};
+
+static const uint8_t usb_product_str[] =
+{
+    0x2C, 0x03,
+    'U', 0x00, 'S', 0x00, 'B', 0x00, '2', 0x00, '.', 0x00, '0', 0x00,
+    ' ', 0x00, 'T', 0x00, 'o', 0x00, ' ', 0x00, 'S', 0x00, 'e', 0x00,
+    'r', 0x00, 'i', 0x00, 'a', 0x00, 'l', 0x00, ' ', 0x00, 'P', 0x00,
+    'o', 0x00, 'r', 0x00, 't', 0x00
+};
+
+static const uint8_t usb_serial_str[] =
+{
+    0x1A, 0x03,
+    'W', 0x00, 'C', 0x00, 'H', 0x00, '4', 0x00, '5', 0x00, '4', 0x00,
+    '5', 0x00, '4', 0x00, '5', 0x00, 'T', 0x00, 'S', 0x00, '2', 0x00
+};
 
 typedef struct
 {
@@ -119,8 +137,6 @@ static const uint8_t *g_descr_ptr;
 static __aligned(4) uint8_t g_ep0_buffer[MAX_PACKET_SIZE];
 static __aligned(4) uint8_t g_ep1_buffer[MAX_PACKET_SIZE];
 static __aligned(4) uint8_t g_ep2_buffer[2 * MAX_PACKET_SIZE];
-static __aligned(4) uint8_t g_ep1_out_buffer[MAX_PACKET_SIZE];
-static uint8_t g_ep0_send_buf[256];
 
 static uint8_t g_ch341_reg_add[CH341_REG_NUM];
 static uint8_t g_ch341_reg_val[CH341_REG_NUM];
@@ -142,6 +158,28 @@ static uint8_t g_usb_buf_pool[USB_BUF_LEN];
 static void usb_buffer_create(struct byte_buf **buf)
 {
     *buf = byte_buf_create(&g_usb_buf_struct, g_usb_buf_pool, sizeof(g_usb_buf_pool));
+}
+
+static void usb_parse_line_coding(uint8_t reg_uart_ctrl)
+{
+    uint8_t data_bit_val = reg_uart_ctrl & 0x03;
+    uint8_t parity_val = reg_uart_ctrl & 0x38;
+
+    if (data_bit_val == 0x00) data_bit_val = HAL_UART_5_BITS_PER_CHAR;
+    else if (data_bit_val == 0x01) data_bit_val = HAL_UART_6_BITS_PER_CHAR;
+    else if (data_bit_val == 0x02) data_bit_val = HAL_UART_7_BITS_PER_CHAR;
+    else data_bit_val = HAL_UART_8_BITS_PER_CHAR;
+
+    if (parity_val == 0x00) parity_val = HAL_UART_NO_PARITY;
+    else if (parity_val == 0x08) parity_val = HAL_UART_ODD_PARITY;
+    else if (parity_val == 0x18) parity_val = HAL_UART_EVEN_PARITY;
+    else if (parity_val == 0x28) parity_val = HAL_UART_MARK_PARITY;
+    else parity_val = HAL_UART_SPACE_PARITY;
+
+    uart0_para.stop_bits = (reg_uart_ctrl & 0x04) ?
+                           HAL_UART_TWO_STOP_BITS : HAL_UART_ONE_STOP_BIT;
+    uart0_para.parity_type = parity_val;
+    uart0_para.data_bits = data_bit_val;
 }
 
 static void ch341_reg_write(uint8_t reg_add, uint8_t reg_val)
@@ -176,30 +214,7 @@ static void ch341_reg_write(uint8_t reg_add, uint8_t reg_val)
 
     if (reg_add == 0x18)
     {
-        uint8_t reg_uart_ctrl = reg_val;
-        uint8_t data_bit_val;
-        uint8_t stop_bit_val;
-        uint8_t parity_val;
-
-        data_bit_val = reg_uart_ctrl & 0x03;
-        if (data_bit_val == 0x00) data_bit_val = HAL_UART_5_BITS_PER_CHAR;
-        else if (data_bit_val == 0x01) data_bit_val = HAL_UART_6_BITS_PER_CHAR;
-        else if (data_bit_val == 0x02) data_bit_val = HAL_UART_7_BITS_PER_CHAR;
-        else data_bit_val = HAL_UART_8_BITS_PER_CHAR;
-
-        stop_bit_val = (reg_uart_ctrl & 0x04) ?
-                       HAL_UART_TWO_STOP_BITS : HAL_UART_ONE_STOP_BIT;
-
-        parity_val = reg_uart_ctrl & 0x38;
-        if (parity_val == 0x00) parity_val = HAL_UART_NO_PARITY;
-        else if (parity_val == 0x08) parity_val = HAL_UART_ODD_PARITY;
-        else if (parity_val == 0x18) parity_val = HAL_UART_EVEN_PARITY;
-        else if (parity_val == 0x28) parity_val = HAL_UART_MARK_PARITY;
-        else parity_val = HAL_UART_SPACE_PARITY;
-
-        uart0_para.stop_bits = stop_bit_val;
-        uart0_para.parity_type = parity_val;
-        uart0_para.data_bits = data_bit_val;
+        usb_parse_line_coding(reg_val);
     }
 }
 
@@ -301,8 +316,6 @@ __attribute__((interrupt("WCH-Interrupt-fast")))
 __attribute__((section(".highcode")))
 void USB_IRQHandler(void)
 {
-    uint8_t i;
-
     if (R8_USB_INT_FG & RB_UIF_TRANSFER)
     {
         if ((R8_USB_INT_ST & MASK_UIS_TOKEN) != MASK_UIS_TOKEN)
@@ -345,11 +358,6 @@ void USB_IRQHandler(void)
                     {
                         R8_UEP1_CTRL ^= RB_UEP_R_TOG;
                         R8_UEP1_CTRL = (R8_UEP1_CTRL & 0xF3) | 0x08;
-
-                        for (i = 0; i < (MAX_PACKET_SIZE / 4); i++)
-                        {
-                            ((UINT32 *)g_ep1_out_buffer)[i] = ((UINT32 *)g_ep1_buffer)[i];
-                        }
                     }
                     else
                     {
@@ -419,30 +427,6 @@ void USB_IRQHandler(void)
     }
 }
 
-static void usb_build_string_desc(uint8_t index)
-{
-    const uint8_t *str;
-    uint8_t str_len;
-    uint8_t *p;
-    uint8_t i;
-
-    if (index == 1) str = usb_manufacturer_str;
-    else if (index == 2) str = usb_product_str;
-    else str = usb_serial_str;
-
-    str_len = (uint8_t)strlen((char *)str);
-    p = g_ep0_send_buf;
-    *p++ = str_len * 2 + 2;
-    *p++ = 0x03;
-    for (i = 0; i < str_len; i++)
-    {
-        *p++ = str[i];
-        *p++ = 0x00;
-    }
-
-    g_descr_ptr = g_ep0_send_buf;
-}
-
 static void usb_handle_setup(uint8_t len)
 {
     usb_setup_req_t *setup = USB_SETUP_BUF;
@@ -507,45 +491,19 @@ static void usb_handle_setup(uint8_t len)
 
             case DEF_VEN_UART_INIT:
             {
-                uint8_t reg_uart_ctrl;
-                uint8_t data_bit_val;
-                uint8_t stop_bit_val;
-                uint8_t parity_val;
                 uint8_t uart_reg1_val;
-                uint8_t uart_reg2_val;
 
                 if (g_ep0_buffer[2] & 0x80)
                 {
-                    reg_uart_ctrl = g_ep0_buffer[3];
-
-                    data_bit_val = reg_uart_ctrl & 0x03;
-                    if (data_bit_val == 0x00) data_bit_val = HAL_UART_5_BITS_PER_CHAR;
-                    else if (data_bit_val == 0x01) data_bit_val = HAL_UART_6_BITS_PER_CHAR;
-                    else if (data_bit_val == 0x02) data_bit_val = HAL_UART_7_BITS_PER_CHAR;
-                    else data_bit_val = HAL_UART_8_BITS_PER_CHAR;
-
-                    stop_bit_val = (reg_uart_ctrl & 0x04) ?
-                                   HAL_UART_TWO_STOP_BITS : HAL_UART_ONE_STOP_BIT;
-
-                    parity_val = reg_uart_ctrl & 0x38;
-                    if (parity_val == 0x00) parity_val = HAL_UART_NO_PARITY;
-                    else if (parity_val == 0x08) parity_val = HAL_UART_ODD_PARITY;
-                    else if (parity_val == 0x18) parity_val = HAL_UART_EVEN_PARITY;
-                    else if (parity_val == 0x28) parity_val = HAL_UART_MARK_PARITY;
-                    else parity_val = HAL_UART_SPACE_PARITY;
-
-                    uart0_para.stop_bits = stop_bit_val;
-                    uart0_para.parity_type = parity_val;
-                    uart0_para.data_bits = data_bit_val;
+                    usb_parse_line_coding(g_ep0_buffer[3]);
 
                     uart_reg1_val = setup->index_l;
-                    uart_reg2_val = setup->index_h;
                     if (!(uart_reg1_val & (1 << 6)))
                     {
                         uart_reg1_val &= 0xC7;
                     }
 
-                    uart0_para.baud_rate = ch341_calc_baud(uart_reg1_val, uart_reg2_val);
+                    uart0_para.baud_rate = ch341_calc_baud(uart_reg1_val, setup->index_h);
                     g_uart_status = 1;
                 }
             } break;
@@ -583,14 +541,12 @@ static void usb_handle_setup(uint8_t len)
                 switch (setup->value_h)
                 {
                     case 1:
-                        memcpy(g_ep0_send_buf, usb_vendor_dev_desc, sizeof(usb_vendor_dev_desc));
-                        g_descr_ptr = g_ep0_send_buf;
+                        g_descr_ptr = usb_vendor_dev_desc;
                         len = sizeof(usb_vendor_dev_desc);
                         break;
 
                     case 2:
-                        memcpy(g_ep0_send_buf, usb_vendor_cfg_desc, sizeof(usb_vendor_cfg_desc));
-                        g_descr_ptr = g_ep0_send_buf;
+                        g_descr_ptr = usb_vendor_cfg_desc;
                         len = sizeof(usb_vendor_cfg_desc);
                         break;
 
@@ -602,10 +558,16 @@ static void usb_handle_setup(uint8_t len)
                                 len = sizeof(usb_lang_str_desc);
                                 break;
                             case 1:
+                                g_descr_ptr = usb_manufacturer_str;
+                                len = sizeof(usb_manufacturer_str);
+                                break;
                             case 2:
+                                g_descr_ptr = usb_product_str;
+                                len = sizeof(usb_product_str);
+                                break;
                             case 3:
-                                usb_build_string_desc(setup->value_l);
-                                len = g_ep0_send_buf[0];
+                                g_descr_ptr = usb_serial_str;
+                                len = sizeof(usb_serial_str);
                                 break;
                             default:
                                 len = 0xFF;
@@ -958,7 +920,6 @@ void usb_uart_init(void)
     PFIC_EnableIRQ(USB_IRQn);
 }
 
-__HIGH_CODE
 void usb_uart_poll(void)
 {
     buf_size_t len;

@@ -25,7 +25,7 @@ LDFLAGS       := $(ARCH) -T$(LDSCRIPT) -nostartfiles \
                  --specs=nano.specs --specs=nosys.specs \
                  -Llib
 
-LIBS          := -Wl,--start-group -lch57x_rf -lisp572 -lm -Wl,--end-group
+LIBS          := -Wl,--start-group -lch57x_rf -lm -Wl,--end-group
 
 C_SOURCES     := $(wildcard src/*.c src/app/*.c src/drivers/*.c)
 ASM_SOURCES   := $(wildcard *.s)

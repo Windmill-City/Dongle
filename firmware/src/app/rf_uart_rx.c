@@ -86,7 +86,7 @@ static void rf_bound(bound_rsp_t *rsp)
 __HIGH_CODE
 static void rf_process_rx(rf_packet_t *packet)
 {
-    rf_packet_t *tx_packet = (rf_packet_t *)g_tx_buf.tx_buf;
+    rf_packet_t *tx_packet = &g_tx_buf.packet;
 
     if (g_bound_status == BOUND_STATUS_IDLE)
     {
@@ -116,7 +116,7 @@ static void rf_process_rx(rf_packet_t *packet)
 
                 if (reg)
                 {
-                    bound_rsp_t *rsp = (bound_rsp_t *)&g_tx_buf.tx_buf[PKT_HEAD_LEN];
+                    bound_rsp_t *rsp = (bound_rsp_t *)&g_tx_buf.rsp;
 
                     g_rf_status = RF_STATUS_TXRSP;
 
@@ -144,7 +144,7 @@ static void rf_process_rx(rf_packet_t *packet)
     }
     else
     {
-        rf_rsp_t *rsp = (rf_rsp_t *)&g_tx_buf.tx_buf[PKT_HEAD_LEN];
+        rf_rsp_t *rsp = &g_tx_buf.rsp;
 
         if (packet->type == PKT_CMD_GET_STATUS)
         {
@@ -260,7 +260,7 @@ static void rf_process_tx(void)
 {
     if (g_rf_status == RF_STATUS_TXRSP)
     {
-        rf_bound((bound_rsp_t *)&g_tx_buf.tx_buf[PKT_HEAD_LEN]);
+        rf_bound((bound_rsp_t *)&g_tx_buf.rsp);
     }
     g_rf_status = RF_STATUS_RX;
     rf_rx_start(g_interval_timer);
@@ -317,12 +317,11 @@ uint8_t rf_uart_rx_read(void *buf, buf_size_t *len)
 __HIGH_CODE
 void rf_uart_rx_init(void)
 {
-    g_rx_data_status = DATA_STATUS_IDLE;
+    g_rx_data_status = DATA_STATUS_START;
     rf_buffer_create(&g_rf_buf_mgr);
     g_data_seq = 0;
     g_server_data = 0;
     g_bound_status = BOUND_STATUS_IDLE;
-    g_tx_buf.status = 0;
     g_interval_timer = CONN_INTERVAL * 1000;
     rf_role_register_status_cbs(&g_rf_cbs);
     g_rf_status = RF_STATUS_WAIT;

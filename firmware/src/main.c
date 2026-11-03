@@ -24,8 +24,6 @@ static void led_set(uint8_t on)
     }
 }
 
-__attribute__((used))
-__HIGH_CODE
 static void main_loop(void)
 {
     uint32_t tick_now;

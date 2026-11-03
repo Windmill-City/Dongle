@@ -68,103 +68,9 @@ void SetSysClock(SYS_CLKTypeDef sc)
     }
 }
 
-uint32_t GetSysClock(void)
-{
-    if((R8_CLK_SYS_CFG & RB_CLK_SYS_MOD) == RB_CLK_SYS_MOD)
-    {
-        return (Freq_LSI);
-    }
-    else if((R8_CLK_SYS_CFG & RB_CLK_SYS_MOD) == 0x40)
-    {
-        return (600000000 / ((R8_CLK_SYS_CFG & 0x1f)?(R8_CLK_SYS_CFG & 0x1f):32));
-    }
-    else
-    {
-        return (32000000 / ((R8_CLK_SYS_CFG & 0x1f)?(R8_CLK_SYS_CFG & 0x1f):32));
-    }
-}
-
-uint8_t SYS_GetInfoSta(SYS_InfoStaTypeDef i)
-{
-    if(i == STA_SAFEACC_ACT)
-    {
-        return (R8_SAFE_ACCESS_SIG & RB_SAFE_ACC_ACT);
-    }
-    else
-    {
-        return (R8_GLOB_CFG_INFO & (1 << i));
-    }
-}
-
-__HIGH_CODE
-void SYS_ResetExecute(void)
-{
-    FLASH_ROM_SW_RESET();
-    sys_safe_access_enable();
-    R8_RST_WDOG_CTRL |= RB_SOFTWARE_RESET;
-    sys_safe_access_disable();
-}
-
-void SYS_DisableAllIrq(uint32_t *pirqv)
-{
-    *pirqv = (PFIC->ISR[0] >> 8) | (PFIC->ISR[1] << 24);
-    PFIC->IRER[0] = 0xffffffff;
-    PFIC->IRER[1] = 0xffffffff;
-    asm volatile("fence.i");
-}
-
-void SYS_RecoverIrq(uint32_t irq_status)
-{
-    PFIC->IENR[0] = (irq_status << 8);
-    PFIC->IENR[1] = (irq_status >> 24);
-}
-
 uint32_t SYS_GetSysTickCnt(void)
 {
     return SysTick->CNTL;
-}
-
-void WWDG_ITCfg(FunctionalState s)
-{
-    uint8_t ctrl = R8_RST_WDOG_CTRL;
-
-    if(s == DISABLE)
-    {
-        ctrl &= ~RB_WDOG_INT_EN;
-    }
-    else
-    {
-        ctrl |= RB_WDOG_INT_EN;
-    }
-
-    sys_safe_access_enable();
-    R8_RST_WDOG_CTRL = ctrl;
-    sys_safe_access_disable();
-}
-
-void WWDG_ResetCfg(FunctionalState s)
-{
-    uint8_t ctrl = R8_RST_WDOG_CTRL;
-
-    if(s == DISABLE)
-    {
-        ctrl &= ~RB_WDOG_RST_EN;
-    }
-    else
-    {
-        ctrl |= RB_WDOG_RST_EN;
-    }
-
-    sys_safe_access_enable();
-    R8_RST_WDOG_CTRL = ctrl;
-    sys_safe_access_disable();
-}
-
-void WWDG_ClearFlag(void)
-{
-    sys_safe_access_enable();
-    R8_RST_WDOG_CTRL |= RB_WDOG_INT_FLAG;
-    sys_safe_access_disable();
 }
 
 __INTERRUPT
@@ -172,10 +78,6 @@ __HIGH_CODE
 __attribute__((weak))
 void HardFault_Handler(void)
 {
-    FLASH_ROM_SW_RESET();
-    sys_safe_access_enable();
-    R16_INT_LSI_TUNE = 0xFFFF;
-    sys_safe_access_disable();
     sys_safe_access_enable();
     R8_RST_WDOG_CTRL |= RB_SOFTWARE_RESET;
     sys_safe_access_disable();
@@ -188,86 +90,4 @@ __attribute__((weak))
 void NMI_Handler(void)
 {
     while(1);
-}
-
-__HIGH_CODE
-void mDelayuS(uint16_t t)
-{
-    uint32_t i;
-#if(FREQ_SYS == 100000000)
-    i = t * 25;
-#elif(FREQ_SYS == 75000000)
-    i = (t * 25)>>1;
-#elif(FREQ_SYS == 60000000)
-    i = t * 10;
-#elif(FREQ_SYS == 50000000)
-    i = (t * 25)>>1;
-#elif(FREQ_SYS == 40000000)
-    i = t * 10;
-#elif(FREQ_SYS == 30000000)
-    i = t * 5;
-#elif(FREQ_SYS == 25000000)
-    i = (t * 25)>>2;
-#elif(FREQ_SYS == 24000000)
-    i = t * 6;
-#elif(FREQ_SYS == 20000000)
-    i = t * 5;
-#elif(FREQ_SYS == 16000000)
-    i = t << 2;
-#elif(FREQ_SYS == 8000000)
-    i = t << 1;
-#elif(FREQ_SYS == 6400000)
-    i = t * 8 / 5;
-#elif(FREQ_SYS == 4000000)
-    i = t;
-#elif(FREQ_SYS == 2000000)
-    i = t >> 1;
-#elif(FREQ_SYS == 1000000)
-    i = t >> 2;
-#else
-    i = t;
-#endif
-
-#if((FREQ_SYS == 75000000)||\
-    (FREQ_SYS == 60000000)||\
-    (FREQ_SYS == 30000000))
-    while(--i)
-    {
-        __nop();
-    };
-#else
-    do
-    {
-        __nop();
-    }while(--i);
-#endif
-}
-
-__HIGH_CODE
-void mDelaymS(uint16_t t)
-{
-    do
-    {
-        mDelayuS(1000);
-    }while(--t);
-}
-
-__attribute__((used))
-void *_sbrk(ptrdiff_t incr)
-{
-    extern char _end[];
-    static char *curbrk = _end;
-
-    if ((curbrk + incr < _end) || ((uint32_t)curbrk + incr > (__get_SP() - 64)))
-    return NULL - 1;
-
-    curbrk += incr;
-    return curbrk - incr;
-}
-
-__HIGH_CODE
-void *__wrap_memcpy(void *dst, void *src, size_t size)
-{
-    __MCPY(dst, src, (void *)((uint32_t)src+size));
-    return dst;
 }
