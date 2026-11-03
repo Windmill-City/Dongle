@@ -1,78 +1,59 @@
-#include "rf.hpp"
-#include "rf_uart_rx.hpp"
-#include "usb_uart.hpp"
+#include <cstdint>
 
-#define LED_PIN             GPIO_Pin_7
-#define USB_ADDR_MASK       0x7F
-#define LED_BLINK_TICKS     (50UL * 1000UL * 1000UL)
+#include "ch572/hal/led.hpp"
+#include "ch572/platform/clock.hpp"
+#include "ch572/platform/registers.hpp"
+#include "ch572/platform/systick.hpp"
+#include "ch572/radio/rf_uart.hpp"
+#include "ch572/usb/ch341.hpp"
 
-static void led_init(void)
+int main()
 {
-    GPIOA_ResetBits(LED_PIN);
-    GPIOA_ModeCfg(LED_PIN, GPIO_ModeOut_PP_5mA);
-}
+    using namespace ch572;
 
-static void led_set(uint8_t on)
-{
-    if (on)
+    hal::Led led;
+    led.init();
+    led.on();
+
+    // PA0/PA1 are the USB data pins; the two-wire debug interface must be off.
+    sysreg::pin_alternate() &= ~sysreg::kPinDebugEnable;
+
+    clock::set_hse_capacitance(clock::HseCapacitance::p18);
+    clock::init_100mhz();
+    systick::start_free_running();
+
+    auto &usb = usb::Ch341Serial::instance();
+    usb.init();
+
+    rf_uart::RfUart rf(usb);
+    usb.set_source(&rf);
+    rf.init();
+
+    constexpr std::uint32_t kBlinkTicks = 50u * 1000u * 1000u; // 500 ms at 100 MHz
+    std::uint32_t last_blink = systick::now();
+    bool usb_ready = false;
+
+    for (;;)
     {
-        GPIOA_SetBits(LED_PIN);
-    }
-    else
-    {
-        GPIOA_ResetBits(LED_PIN);
-    }
-}
+        usb.poll();
 
-static void main_loop(void)
-{
-    uint32_t tick_now;
-    uint32_t tick_last = SYS_GetSysTickCnt();
-    uint8_t led_on = 0;
-    uint8_t usb_ready = 0;
-
-    while (1)
-    {
-        UsbUart::get().poll();
-
-        tick_now = SYS_GetSysTickCnt();
-
-        if (R8_USB_DEV_AD & USB_ADDR_MASK)
+        const std::uint32_t now = systick::now();
+        if (usb.enumerated())
         {
             if (!usb_ready)
             {
-                usb_ready = 1;
-                led_on = 1;
-                led_set(led_on);
+                usb_ready = true;
+                led.on();
             }
         }
         else
         {
-            usb_ready = 0;
-            if ((uint32_t)(tick_now - tick_last) >= LED_BLINK_TICKS)
+            usb_ready = false;
+            if ((now - last_blink) >= kBlinkTicks)
             {
-                tick_last = tick_now;
-                led_on ^= 1;
-                led_set(led_on);
+                last_blink = now;
+                led.toggle();
             }
         }
     }
-}
-
-int main(void)
-{
-    led_init();
-    led_set(1);
-
-    R16_PIN_ALTERNATE &= ~RB_PIN_DEBUG_EN;
-    HSECFG_Capacitance(HSECap_18p);
-    SetSysClock(CLK_SOURCE_HSE_PLL_100MHz);
-
-    __SysTick_Config(SysTick_LOAD_RELOAD_Msk);
-
-    UsbUart::get().init();
-    Rf::get().init();
-    RfUart::get().init();
-
-    main_loop();
 }
