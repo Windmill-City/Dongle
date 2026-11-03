@@ -12,8 +12,7 @@ namespace ch572::rf_uart {
 
 inline constexpr std::size_t kRfBufferSize = 512;
 inline constexpr std::size_t kMaxPayload = 251;
-inline constexpr std::size_t kPacketHeaderSize = 4;
-inline constexpr std::size_t kDataOffset = 2;
+inline constexpr std::size_t kPacketHeaderSize = 2;
 inline constexpr std::size_t kMaxRxPacket = kMaxPayload + kPacketHeaderSize;
 
 inline constexpr std::uint16_t kConnectionInterval = 10;
@@ -27,12 +26,21 @@ inline constexpr std::uint8_t kDefaultAccessAddressEx = 0;
 inline constexpr std::uint32_t kDefaultCrcInit = 0x555555u;
 inline constexpr std::uint32_t kDefaultCrcPoly = 0x80032Du;
 
-inline constexpr std::uint8_t kPacketCommandBoundRequest = 0x01;
-inline constexpr std::uint8_t kPacketCommandGetStatus = 0x02;
-inline constexpr std::uint8_t kPacketDataFlag = 0x7E;
-inline constexpr std::uint8_t kPacketCommandBoundResponse = 0x80 | kPacketCommandBoundRequest;
-inline constexpr std::uint8_t kPacketCommandStatusResponse = 0x80 | kPacketCommandGetStatus;
-inline constexpr std::uint8_t kPacketDataAck = 0x80 | kPacketDataFlag;
+inline constexpr std::uint8_t kPacketTypeBoundRequest = 0x0;
+inline constexpr std::uint8_t kPacketTypeGetStatus = 0x1;
+inline constexpr std::uint8_t kPacketTypeData = 0x2;
+inline constexpr std::uint8_t kPacketTypeResponseFlag = 0x4;
+
+inline constexpr std::uint8_t kPacketCommandBoundRequest = kPacketTypeBoundRequest;
+inline constexpr std::uint8_t kPacketCommandGetStatus = kPacketTypeGetStatus;
+inline constexpr std::uint8_t kPacketDataFlag = kPacketTypeData;
+inline constexpr std::uint8_t kPacketCommandBoundResponse =
+    kPacketTypeResponseFlag | kPacketTypeBoundRequest;
+inline constexpr std::uint8_t kPacketCommandStatusResponse =
+    kPacketTypeResponseFlag | kPacketTypeGetStatus;
+inline constexpr std::uint8_t kPacketDataAck = kPacketTypeResponseFlag | kPacketTypeData;
+
+inline constexpr std::uint8_t kPacketSequenceMask = 0x1F;
 
 inline constexpr std::uint8_t kOpcodeData = 0x00;
 inline constexpr std::uint8_t kOpcodeBsp = 0x01;
@@ -40,10 +48,9 @@ inline constexpr std::uint8_t kOpcodeAck = 0xF0;
 
 struct CH572_PACKED Packet
 {
-    std::uint8_t type;
+    std::uint8_t type : 3;
+    std::uint8_t sequence : 5;
     std::uint8_t length;
-    std::uint8_t sequence;
-    std::uint8_t reserved;
 };
 
 struct CH572_PACKED BoundRequest
@@ -85,7 +92,7 @@ struct TxBuffer
     Response response;
 };
 
-static_assert(sizeof(Packet) == 4, "RF packet header is four bytes");
+static_assert(sizeof(Packet) == 2, "RF packet header is two bytes");
 static_assert(sizeof(BoundRequest) == 4, "bound request layout");
 static_assert(sizeof(BoundResponse) == 12, "bound response layout");
 

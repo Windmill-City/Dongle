@@ -191,10 +191,10 @@ void RfUart::process_rx(Packet *packet) noexcept
         if (packet->type == kPacketCommandBoundRequest)
         {
             auto *request = reinterpret_cast<BoundRequest *>(packet + 1);
-            if (packet->length == sizeof(BoundRequest) + kDataOffset)
+            if (packet->length == sizeof(BoundRequest))
             {
                 const std::int8_t rssi = *reinterpret_cast<std::uint8_t *>(
-                    reinterpret_cast<std::uint8_t *>(packet) + packet->length + 4u);
+                    reinterpret_cast<std::uint8_t *>(packet) + packet->length + kPacketHeaderSize);
 
                 bool accept = false;
                 if (request->server_data != 0)
@@ -217,9 +217,8 @@ void RfUart::process_rx(Packet *packet) noexcept
 
                     auto *binding = reinterpret_cast<BoundResponse *>(&response);
                     packet_out.type = kPacketCommandBoundResponse;
-                    packet_out.length = static_cast<std::uint8_t>(kDataOffset + sizeof(BoundResponse));
+                    packet_out.length = static_cast<std::uint8_t>(sizeof(BoundResponse));
                     packet_out.sequence = m_data_sequence;
-                    packet_out.reserved = 0;
 
                     binding->access_address = random_access_address(static_cast<std::uint16_t>(m_server_data));
                     binding->channel = static_cast<std::uint8_t>(m_server_data & 0x3Fu);
@@ -229,7 +228,7 @@ void RfUart::process_rx(Packet *packet) noexcept
                     binding->timeout = kConnectionTimeout;
 
                     start_tx(20);
-                    ++m_data_sequence;
+                    m_data_sequence = static_cast<std::uint8_t>((m_data_sequence + 1u) & kPacketSequenceMask);
                     m_interval_timer = static_cast<std::uint32_t>(request->interval) * 1000u;
                     m_timeout_max = kBindEstablishCount;
                     return;
@@ -250,11 +249,10 @@ void RfUart::process_rx(Packet *packet) noexcept
             if (m_bound_status < BoundStatus::established)
             {
                 packet_out.length = static_cast<std::uint8_t>(
-                    kDataOffset + 1 + sizeof(usb::LineCoding));
+                    1 + sizeof(usb::LineCoding));
                 response.opcode = kOpcodeBsp;
                 fill_line_coding(response, m_usb.line_coding());
                 packet_out.sequence = m_data_sequence;
-                packet_out.reserved = 0;
             }
             else
             {
@@ -262,29 +260,26 @@ void RfUart::process_rx(Packet *packet) noexcept
                 if (result.status == usb::HostReadStatus::data)
                 {
                     packet_out.length = static_cast<std::uint8_t>(
-                        kDataOffset + 1 + result.length);
+                        1 + result.length);
                     response.opcode = kOpcodeData;
                     packet_out.sequence = m_data_sequence;
-                    packet_out.reserved = 0;
                 }
                 else if (result.status == usb::HostReadStatus::line_coding_changed)
                 {
                     packet_out.length = static_cast<std::uint8_t>(
-                        kDataOffset + 1 + sizeof(usb::LineCoding));
+                        1 + sizeof(usb::LineCoding));
                     response.opcode = kOpcodeBsp;
                     fill_line_coding(response, m_usb.line_coding());
                     packet_out.sequence = m_data_sequence;
-                    packet_out.reserved = 0;
                 }
                 else
                 {
-                    packet_out.length = static_cast<std::uint8_t>(kDataOffset);
+                    packet_out.length = 0;
                     response.opcode = kOpcodeAck;
                     packet_out.sequence = m_data_sequence;
-                    packet_out.reserved = 0;
                 }
             }
-            ++m_data_sequence;
+            m_data_sequence = static_cast<std::uint8_t>((m_data_sequence + 1u) & kPacketSequenceMask);
         }
         start_tx(20);
     }
@@ -293,10 +288,9 @@ void RfUart::process_rx(Packet *packet) noexcept
         m_radio_status = RadioStatus::transmit;
         if (packet->sequence == m_data_sequence)
         {
-            std::size_t length = packet->length;
-            if (length > kDataOffset)
+            const std::size_t length = packet->length;
+            if (length > 0)
             {
-                length -= kDataOffset;
                 m_rf_buffer.write(packet + 1, length);
                 m_rx_status = RxDataStatus::receiving;
             }
@@ -311,16 +305,15 @@ void RfUart::process_rx(Packet *packet) noexcept
             if (result.status == usb::HostReadStatus::data)
             {
                 packet_out.length = static_cast<std::uint8_t>(
-                    kDataOffset + 1 + result.length);
+                    1 + result.length);
                 response.opcode = kOpcodeData;
             }
             else
             {
-                packet_out.length = static_cast<std::uint8_t>(kDataOffset);
+                packet_out.length = 0;
             }
             packet_out.sequence = m_data_sequence;
-            packet_out.reserved = 0;
-            ++m_data_sequence;
+            m_data_sequence = static_cast<std::uint8_t>((m_data_sequence + 1u) & kPacketSequenceMask);
         }
         start_tx(20);
     }
