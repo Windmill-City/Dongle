@@ -4,24 +4,22 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#ifndef typeBufSize
-typedef unsigned long   typeBufSize;
-#endif
+typedef unsigned long buf_size_t;
 
-struct simple_buf {
+struct byte_buf {
     uint8_t *start;
     uint8_t *end;
     uint8_t *read;
     uint8_t *write;
-    uint16_t  buf_len;
+    uint16_t buf_len;
     uint16_t volatile data_len;
 };
 
-struct simple_buf *simple_buf_create(struct simple_buf *buf,
+struct byte_buf *byte_buf_create(struct byte_buf *buf,
             uint8_t *buf_pool, uint16_t pool_size);
 
-typeBufSize write_buf(struct simple_buf *buf, void *src, typeBufSize *len );
+buf_size_t byte_buf_write(struct byte_buf *buf, void *src, buf_size_t *len);
 
-typeBufSize read_buf( struct simple_buf *buf, void *dst, typeBufSize *len );
+buf_size_t byte_buf_read(struct byte_buf *buf, void *dst, buf_size_t *len);
 
 #endif

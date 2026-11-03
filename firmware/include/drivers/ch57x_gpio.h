@@ -1,5 +1,5 @@
-#ifndef __CH57x_GPIO_H__
-#define __CH57x_GPIO_H__
+#ifndef __ch57x_GPIO_H__
+#define __ch57x_GPIO_H__
 
 #ifdef __cplusplus
 extern "C" {

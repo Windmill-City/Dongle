@@ -1,7 +1,12 @@
 # CH570Q Dongle 固件
 
 基于沁恒 `CH572EVT` 中的 RF_UartDongle 例程，适配本工程的 Dongle 板。
-USB CDC 虚拟串口与 2.4G 无线串口双向透传。
+固件仅保留两项功能：
+
+- USB 虚拟串口与 2.4G 无线串口双向透传；
+- 板载 LED 指示：未枚举时 500ms 闪烁，枚举成功后常亮。
+
+调试串口、`printf`、日志和未使用的外设驱动均已移除。
 
 ## 目录结构
 
@@ -9,22 +14,24 @@ USB CDC 虚拟串口与 2.4G 无线串口双向透传。
 firmware/
 ├─ Makefile
 ├─ README.md
+├─ link.ld                   链接脚本
+├─ startup_ch572.s           启动文件
 ├─ src/
-│  ├─ main.c                 应用入口、板级 LED、主循环
+│  ├─ main.c                 应用入口、LED、主循环
 │  ├─ app/
 │  │  ├─ buf.c               环形缓冲区
-│  │  ├─ my_printf.c         精简 printf
 │  │  ├─ rf.c                2.4G 收发底层
 │  │  ├─ rf_uart_rx.c        USB <-> 2.4G 透传与配对
-│  │  └─ usb_uart.c          USB CDC 设备
-│  ├─ drivers/               沁恒 StdPeriphDriver
-│  └─ startup/               启动文件
+│  │  └─ usb_uart.c          USB 串口设备
+│  └─ drivers/
+│     ├─ ch57x_clk.c         时钟
+│     ├─ ch57x_gpio.c        GPIO
+│     └─ ch57x_sys.c         系统与延时
 ├─ include/
 │  ├─ app/                   应用头文件
 │  ├─ drivers/               外设库头文件
-│  └─ chip/                  CH572rf.h、core_riscv.h
-├─ lib/                      libCH57xRF.a、libISP572.a
-├─ ld/                       Link.ld
+│  └─ chip/                  ch572rf.h、core_riscv.h
+├─ lib/                      libch57x_rf.a、libisp572.a
 └─ build/                    编译产物（不提交）
 ```
 
@@ -66,17 +73,17 @@ make MRS_TOOLCHAIN="C:/path/to/RISC-V Embedded GCC15/bin"
 输出：
 
 ```
-build/RF_UartDongle.hex
-build/RF_UartDongle.bin
-build/RF_UartDongle.elf
-build/RF_UartDongle.map
+build/rf_uart_dongle.hex
+build/rf_uart_dongle.bin
+build/rf_uart_dongle.elf
+build/rf_uart_dongle.map
 ```
 
 编译参数为 `-march=rv32imcb -mabi=ilp32`。
 
 ## 烧录
 
-编译后使用 `build/RF_UartDongle.hex`。可选方式：
+编译后使用 `build/rf_uart_dongle.hex`。可选方式：
 
 1. **USB ISP**：WCHISPTool 选 CH570，USB 下载；上电瞬间 PA1(D+) 要为高。
    本板没有下载按键，需要飞线/探针把 PA1 顶到 3.3V 再插 USB。
@@ -85,7 +92,8 @@ build/RF_UartDongle.map
 
 ## USB / 无线说明
 
-- USB：CDC 虚拟串口，`VID:PID = 1a86:8040`，产品名 “USB2.0 To Serial Port”。
+- USB：CH341/CH340 兼容的厂商串口设备，`VID:PID = 1a86:7523`，
+  产品名 “USB2.0 To Serial Port”。
 - 2.4G：默认 2Mbps PHY，通道 17，地址 `0x57250425`，与官方 RF_Uart
   （发送端）例程配对使用；配对成功后 dongle 把无线数据从 USB 串口吐出，
   同时把串口数据回传无线端。

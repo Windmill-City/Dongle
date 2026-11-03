@@ -1,4 +1,4 @@
-#include "CH57x_common.h"
+#include "ch57x_common.h"
 
 uint32_t Freq_LSI = 0;
 

@@ -1,5 +1,5 @@
-#ifndef __CH57x_COMM_H__
-#define __CH57x_COMM_H__
+#ifndef __ch57x_COMM_H__
+#define __ch57x_COMM_H__
 
 #ifdef __cplusplus
  extern "C" {
@@ -22,16 +22,6 @@
 #endif
 #endif
 
-#ifdef DEBUG
-#include <stdio.h>
-#endif
-
-#ifdef  DEBUG
-#define PRINT(X...) printf(X)
-#else
-#define PRINT(X...)
-#endif
-
 #ifndef	 FREQ_SYS
 #define  FREQ_SYS		100000000
 #endif
@@ -42,23 +32,14 @@
 
 #include <string.h>
 #include <stdint.h>
-#include <CH572SFR.h>
+#include <ch572sfr.h>
 #include "core_riscv.h"
-#include "CH57x_clk.h"
-#include "CH57x_cmp.h"
-#include "CH57x_keyscan.h"
-#include "CH57x_uart.h"
-#include "CH57x_gpio.h"
-#include "CH57x_i2c.h"
-#include "CH57x_flash.h"
-#include "CH57x_pwr.h"
-#include "CH57x_pwm.h"
-#include "CH57x_sys.h"
-#include "CH57x_timer.h"
-#include "CH57x_spi.h"
-#include "CH57x_usbdev.h"
-#include "CH57x_usbhost.h"
-#include "ISP572.h"
+#include "ch57x_clk.h"
+#include "ch57x_gpio.h"
+#include "ch57x_sys.h"
+#include "ch57x_timer.h"
+#include "ch57x_usbdev.h"
+#include "isp572.h"
 
  extern uint32_t Freq_LSI;
 

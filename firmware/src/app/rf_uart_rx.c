@@ -2,44 +2,40 @@
 #include "rf_uart_rx.h"
 #include "usb_uart.h"
 
-static uint8_t rf_buf[RF_BUF_LEN];
-static struct simple_buf *pRfBuf = NULL;
-static struct simple_buf rf_buffer;
-uint32_t gBaudRate;
+static uint8_t g_rf_buf[RF_BUF_LEN];
+static struct byte_buf *g_rf_buf_mgr;
+static struct byte_buf g_rf_buf_struct;
 
-rfTxBuf_t gTxBuf;
-uint32_t gSysClock;
-uint32_t gRfTxCount;
-uint32_t gIntervalTimer;
-uint16_t gServerData;
-uint16_t gTimeoutMax;
-uint16_t gTimeout;
+static rf_tx_buf_t g_tx_buf;
+static uint32_t g_server_data;
+static uint32_t g_interval_timer;
+static uint16_t g_timeout_max;
+static uint16_t g_timeout;
+static uint8_t g_data_seq;
+static uint8_t g_rf_status;
+static uint8_t g_bound_status;
+static uint8_t g_rx_data_status;
 
-uint8_t gDataSeq;
-uint8_t gRfStatus;
-uint8_t gBoundStatus;
-uint8_t gRxDataStatus;
+static void rf_process_rx(rf_packet_t *packet);
+static void rf_process_tx(void);
+static void rf_process_crc_error(void);
+static void rf_process_timeout(void);
 
-static void rfProcessRx( rfPackage_t *pPkt );
-static void rfProcessTx( void );
-static void rfProcessCrcError( void );
-static  void rfProcessTimeout( void );
-
-rfStatusCBs_t rfCBs =
+static rf_status_cbs_t g_rf_cbs =
 {
-    rfProcessRx,
-    rfProcessTx,
-    rfProcessCrcError,
-    rfProcessTimeout,
+    rf_process_rx,
+    rf_process_tx,
+    rf_process_crc_error,
+    rf_process_timeout,
 };
 
-static void rf_buffer_create(struct simple_buf **buf)
+static void rf_buffer_create(struct byte_buf **buf)
 {
-    *buf = simple_buf_create(&rf_buffer, rf_buf, sizeof(rf_buf) );
+    *buf = byte_buf_create(&g_rf_buf_struct, g_rf_buf, sizeof(g_rf_buf));
 }
 
 __HIGH_CODE
-uint32_t rf_rand16( uint32_t seed )
+uint32_t rf_rand16(uint32_t seed)
 {
     static uint32_t holdrand;
     uint64_t tmp;
@@ -47,310 +43,287 @@ uint32_t rf_rand16( uint32_t seed )
     holdrand += seed;
     holdrand = holdrand * 1664525 + 1013904223;
     tmp = holdrand;
-    tmp = (tmp*0xFFFF)>>32;
+    tmp = (tmp * 0xFFFF) >> 32;
     return tmp;
 }
 
 __HIGH_CODE
-uint32_t rf_rand_aa( uint16_t rand )
+uint32_t rf_rand_aa(uint16_t rand)
 {
     uint32_t aa = rand;
 
-    aa = (aa<<8)|0x6E0000B6;
+    aa = (aa << 8) | 0x6E0000B6;
     return aa;
 }
 
-static void rf_disconnect( void )
+static void rf_disconnect(void)
 {
-    PRINT("disconnect.\n" );
-    RFRole_Shut( );
-    gBoundStatus = BOUND_STATUS_IDLE;
-    gRxDataStatus = DATA_STATUS_START;
+    RFRole_Shut();
+    g_bound_status = BOUND_STATUS_IDLE;
+    g_rx_data_status = DATA_STATUS_START;
     TMR_ITCfg(DISABLE, TMR_IT_CYC_END);
 
-    rf_tx_set_sync_word( AA );
-    rf_tx_set_frequency( DEF_FREQUENCY );
-    rf_rx_set_sync_word( AA );
-    rf_rx_set_frequency( DEF_FREQUENCY );
-    gRfStatus = RF_STATUS_WAIT;
+    rf_tx_set_sync_word(AA);
+    rf_tx_set_frequency(DEF_FREQUENCY);
+    rf_rx_set_sync_word(AA);
+    rf_rx_set_frequency(DEF_FREQUENCY);
+    g_rf_status = RF_STATUS_WAIT;
 }
 
-static void rf_bound( bound_rsp_t *rsp )
+static void rf_bound(bound_rsp_t *rsp)
 {
-    gTimeout = 0;
-    gBoundStatus = BOUND_STATUS_WAIT;
-    rf_tx_set_sync_word( rsp->accessaddr );
-    rf_tx_set_frequency( rsp->channel );
-    rf_tx_set_phy_type( rsp->phy );
+    g_timeout = 0;
+    g_bound_status = BOUND_STATUS_WAIT;
+    rf_tx_set_sync_word(rsp->access_addr);
+    rf_tx_set_frequency(rsp->channel);
+    rf_tx_set_phy_type(rsp->phy);
 
-    rf_rx_set_sync_word( rsp->accessaddr );
-    rf_rx_set_frequency( rsp->channel );
-    rf_rx_set_phy_type( rsp->phy );
-    PRINT("bound success.%X %x\n",rsp->accessaddr,rsp->channel );
+    rf_rx_set_sync_word(rsp->access_addr);
+    rf_rx_set_frequency(rsp->channel);
+    rf_rx_set_phy_type(rsp->phy);
 }
 
 __HIGH_CODE
-static void rfProcessRx( rfPackage_t *pPkt )
+static void rf_process_rx(rf_packet_t *packet)
 {
-    rfPackage_t *pPkt_t = (rfPackage_t *)gTxBuf.TxBuf;
+    rf_packet_t *tx_packet = (rf_packet_t *)g_tx_buf.tx_buf;
 
-    if( gBoundStatus == BOUND_STATUS_IDLE )
+    if (g_bound_status == BOUND_STATUS_IDLE)
     {
-        if( pPkt->type == PKT_CMD_BOUND_REQ )
+        if (packet->type == PKT_CMD_BOUND_REQ)
         {
-            BOOL reg=0;
-            bound_req_t  *pReq_t =  ( bound_req_t  *)(pPkt+1);
-            if( pPkt->length == sizeof(bound_req_t) + 2 )
+            BOOL reg = 0;
+            bound_req_t *req = (bound_req_t *)(packet + 1);
+
+            if (packet->length == sizeof(bound_req_t) + 2)
             {
-                int8_t rssi  = *(uint8_t* )((uint8_t* )pPkt + pPkt->length + 2 +2 );
+                int8_t rssi = *(uint8_t *)((uint8_t *)packet + packet->length + 2 + 2);
 
-                if( pReq_t->severData )
+                if (req->server_data)
                 {
-
-                    if( !gServerData || pReq_t->severData == gServerData )
+                    if (!g_server_data || req->server_data == g_server_data)
                     {
                         reg = 1;
                     }
                 }
                 else
                 {
-
-                    if( rssi > -35 )
+                    if (rssi > -35)
                     {
                         reg = 1;
                     }
                 }
-                if( reg )
-                {
-                    bound_rsp_t *pRsp_t = (bound_rsp_t *)&gTxBuf.TxBuf[PKT_HEAD_LEN];
 
-                    gRfStatus = RF_STATUS_TXRSP;
-
-                    gDataSeq = 0;
-                    gServerData = rf_rand16( rssi );
-                    pPkt_t->type = PKT_CMD_BOUND_RSP;
-                    pPkt_t->length = PKT_DATA_OFFSET+sizeof(bound_rsp_t);
-                    pPkt_t->seq = gDataSeq;
-                    pPkt_t->resv = 0;
-                    pRsp_t->accessaddr = rf_rand_aa( gServerData );
-                    pRsp_t->channel = gServerData&0x3F;
-                    pRsp_t->phy = CONN_PHY_TYPE;
-                    pRsp_t->severData = gServerData;
-                    pRsp_t->interval = CONN_INTERVAL;
-                    pRsp_t->timeout = CONN_TIMEOUT;
-                    rf_tx_start( pPkt_t, 20 );
-                    gDataSeq++;
-                    gIntervalTimer = pReq_t->interval*1000;
-                    gTimeoutMax = BOUND_EST_COUNT;
-                    return ;
-                }
-                else
+                if (reg)
                 {
-                    PRINT(" reject..\n");
+                    bound_rsp_t *rsp = (bound_rsp_t *)&g_tx_buf.tx_buf[PKT_HEAD_LEN];
+
+                    g_rf_status = RF_STATUS_TXRSP;
+
+                    g_data_seq = 0;
+                    g_server_data = rf_rand16(rssi);
+                    tx_packet->type = PKT_CMD_BOUND_RSP;
+                    tx_packet->length = PKT_DATA_OFFSET + sizeof(bound_rsp_t);
+                    tx_packet->seq = g_data_seq;
+                    tx_packet->resv = 0;
+                    rsp->access_addr = rf_rand_aa(g_server_data);
+                    rsp->channel = g_server_data & 0x3F;
+                    rsp->phy = CONN_PHY_TYPE;
+                    rsp->server_data = g_server_data;
+                    rsp->interval = CONN_INTERVAL;
+                    rsp->timeout = CONN_TIMEOUT;
+                    rf_tx_start(tx_packet, 20);
+                    g_data_seq++;
+                    g_interval_timer = req->interval * 1000;
+                    g_timeout_max = BOUND_EST_COUNT;
+                    return;
                 }
-                PRINT( "rssi=%d \n",rssi);
             }
         }
-        gRfStatus = RF_STATUS_WAIT;
+        g_rf_status = RF_STATUS_WAIT;
     }
     else
     {
-        rfRsp_t *pRsp_t = (rfRsp_t *)&gTxBuf.TxBuf[PKT_HEAD_LEN];
-        if( pPkt->type == PKT_CMD_GET_STATUS )
+        rf_rsp_t *rsp = (rf_rsp_t *)&g_tx_buf.tx_buf[PKT_HEAD_LEN];
+
+        if (packet->type == PKT_CMD_GET_STATUS)
         {
-            gRfStatus = RF_STATUS_TX;
-            if( pPkt->seq == gDataSeq )
+            g_rf_status = RF_STATUS_TX;
+            if (packet->seq == g_data_seq)
             {
                 uint8_t s;
-                typeBufSize len = DATA_LEN_MAX_TX;
-                pPkt_t->type = PKT_CMD_RSP_STATUS;
-                if( gBoundStatus < BOUND_STATUS_EST  )
-                {
+                buf_size_t len = DATA_LEN_MAX_TX;
 
-                    pPkt_t->length = PKT_DATA_OFFSET+1+sizeof(Uart0Para);
-                    pRsp_t->opcode = OPCODE_BSP;
-                    pRsp_t->buad_t.BaudRate = Uart0Para.BaudRate;
-                    pRsp_t->buad_t.StopBits = Uart0Para.StopBits;
-                    pRsp_t->buad_t.ParityType = Uart0Para.ParityType;
-                    pRsp_t->buad_t.DataBits = Uart0Para.DataBits;
-                    pRsp_t->buad_t.ioStaus = Uart0Para.ioStaus;
-                    pPkt_t->seq = gDataSeq;
-                    pPkt_t->resv = 0;
+                tx_packet->type = PKT_CMD_RSP_STATUS;
+                if (g_bound_status < BOUND_STATUS_EST)
+                {
+                    tx_packet->length = PKT_DATA_OFFSET + 1 + sizeof(line_code_t);
+                    rsp->opcode = OPCODE_BSP;
+                    rsp->uart.baud_rate = uart0_para.baud_rate;
+                    rsp->uart.stop_bits = uart0_para.stop_bits;
+                    rsp->uart.parity_type = uart0_para.parity_type;
+                    rsp->uart.data_bits = uart0_para.data_bits;
+                    rsp->uart.io_status = uart0_para.io_status;
+                    tx_packet->seq = g_data_seq;
+                    tx_packet->resv = 0;
                 }
                 else
                 {
-                    s = USB_RxQuery( pRsp_t->other.rspData, &len );
-                    if( s == 0 )
+                    s = usb_uart_read(rsp->payload.data, &len);
+                    if (s == 0)
                     {
-                        pPkt_t->length = PKT_DATA_OFFSET+1+len;
-                        pRsp_t->opcode = OPCODE_DATA;
-                        pPkt_t->seq = gDataSeq;
-                        pPkt_t->resv = 0;
-                        gRfTxCount += len;
+                        tx_packet->length = PKT_DATA_OFFSET + 1 + len;
+                        rsp->opcode = OPCODE_DATA;
+                        tx_packet->seq = g_data_seq;
+                        tx_packet->resv = 0;
                     }
-                    else if( s == 0x80 )
+                    else if (s == 0x80)
                     {
-
-                        pPkt_t->length = PKT_DATA_OFFSET+1+sizeof(Uart0Para);
-                        pRsp_t->opcode = OPCODE_BSP;
-                        pRsp_t->buad_t.BaudRate = Uart0Para.BaudRate;
-                        pRsp_t->buad_t.StopBits = Uart0Para.StopBits;
-                        pRsp_t->buad_t.ParityType = Uart0Para.ParityType;
-                        pRsp_t->buad_t.DataBits = Uart0Para.DataBits;
-                        pRsp_t->buad_t.ioStaus = Uart0Para.ioStaus;
-                        pPkt_t->seq = gDataSeq;
-                        pPkt_t->resv = 0;
+                        tx_packet->length = PKT_DATA_OFFSET + 1 + sizeof(line_code_t);
+                        rsp->opcode = OPCODE_BSP;
+                        rsp->uart.baud_rate = uart0_para.baud_rate;
+                        rsp->uart.stop_bits = uart0_para.stop_bits;
+                        rsp->uart.parity_type = uart0_para.parity_type;
+                        rsp->uart.data_bits = uart0_para.data_bits;
+                        rsp->uart.io_status = uart0_para.io_status;
+                        tx_packet->seq = g_data_seq;
+                        tx_packet->resv = 0;
                     }
                     else
                     {
-                        pPkt_t->length = PKT_DATA_OFFSET;
-                        pRsp_t->opcode = OPCODE_ACK;
-                        pPkt_t->seq = gDataSeq;
-                        pPkt_t->resv = 0;
+                        tx_packet->length = PKT_DATA_OFFSET;
+                        rsp->opcode = OPCODE_ACK;
+                        tx_packet->seq = g_data_seq;
+                        tx_packet->resv = 0;
                     }
                 }
-                gDataSeq++;
+                g_data_seq++;
             }
-            rf_tx_start( pPkt_t, 20 );
-            if( pRsp_t->opcode == OPCODE_BSP )
-            {
-                PRINT("uart param.\n");
-            }
+            rf_tx_start(tx_packet, 20);
         }
-        else if( pPkt->type == PKT_DATA_FLAG )
+        else if (packet->type == PKT_DATA_FLAG)
         {
-            gRfStatus = RF_STATUS_TX;
-            if( pPkt->seq == gDataSeq )
+            g_rf_status = RF_STATUS_TX;
+            if (packet->seq == g_data_seq)
             {
-                typeBufSize len = pPkt->length;
+                buf_size_t len = packet->length;
+
                 len -= PKT_DATA_OFFSET;
-                write_buf( pRfBuf, (pPkt+1), &len );
-                gRxDataStatus = DATA_STATUS_RCV;
+                byte_buf_write(g_rf_buf_mgr, (packet + 1), &len);
+                g_rx_data_status = DATA_STATUS_RCV;
 
                 len = DATA_LEN_MAX_TX;
-                pPkt_t->type = PKT_DATA_RSP_ACK;
-                if( gBoundStatus == BOUND_STATUS_EST && !USB_RxQuery( pRsp_t->other.rspData, &len ) )
+                tx_packet->type = PKT_DATA_RSP_ACK;
+                if (g_bound_status == BOUND_STATUS_EST &&
+                    !usb_uart_read(rsp->payload.data, &len))
                 {
-                    pPkt_t->length = PKT_DATA_OFFSET+1+len;
-                    pRsp_t->opcode = OPCODE_DATA;
-                    pPkt_t->seq = gDataSeq;
-                    pPkt_t->resv = 0;
-                    gRfTxCount += len;
+                    tx_packet->length = PKT_DATA_OFFSET + 1 + len;
+                    rsp->opcode = OPCODE_DATA;
+                    tx_packet->seq = g_data_seq;
+                    tx_packet->resv = 0;
                 }
                 else
                 {
-                    pPkt_t->length = PKT_DATA_OFFSET;
-                    pPkt_t->seq = gDataSeq;
-                    pPkt_t->resv = 0;
+                    tx_packet->length = PKT_DATA_OFFSET;
+                    tx_packet->seq = g_data_seq;
+                    tx_packet->resv = 0;
                 }
-                gDataSeq++;
+                g_data_seq++;
             }
-            else
-            {
-
-            }
-            rf_tx_start( pPkt_t, 20 );
+            rf_tx_start(tx_packet, 20);
         }
         else
         {
-            PRINT("error data.\n");
-            if( ++gTimeout > gTimeoutMax )
+            if (++g_timeout > g_timeout_max)
             {
-                gRxDataStatus = DATA_STATUS_TIMEOUT;
-                PRINT("connect timeout.\n");
+                g_rx_data_status = DATA_STATUS_TIMEOUT;
             }
             else
             {
-                gRfStatus = RF_STATUS_WAIT;
+                g_rf_status = RF_STATUS_WAIT;
             }
-            return ;
+            return;
         }
-        if( gBoundStatus == BOUND_STATUS_WAIT )
+
+        if (g_bound_status == BOUND_STATUS_WAIT)
         {
-
-            gBoundStatus = BOUND_STATUS_EST;
-            gIntervalTimer = CONN_INTERVAL*1000;
-            gTimeoutMax = (CONN_TIMEOUT*10/CONN_INTERVAL);
-       }
-       gTimeout = 0;
+            g_bound_status = BOUND_STATUS_EST;
+            g_interval_timer = CONN_INTERVAL * 1000;
+            g_timeout_max = (CONN_TIMEOUT * 10 / CONN_INTERVAL);
+        }
+        g_timeout = 0;
     }
 }
 
 __HIGH_CODE
-static void rfProcessTx( void )
+static void rf_process_tx(void)
 {
-    if( gRfStatus == RF_STATUS_TXRSP )
+    if (g_rf_status == RF_STATUS_TXRSP)
     {
-         rf_bound( (bound_rsp_t *)&gTxBuf.TxBuf[PKT_HEAD_LEN] );
+        rf_bound((bound_rsp_t *)&g_tx_buf.tx_buf[PKT_HEAD_LEN]);
     }
-    gRfStatus = RF_STATUS_RX;
-    rf_rx_start( gIntervalTimer );
+    g_rf_status = RF_STATUS_RX;
+    rf_rx_start(g_interval_timer);
 }
 
 __HIGH_CODE
-static void rfProcessCrcError( void )
+static void rf_process_crc_error(void)
 {
-    gRfStatus = RF_STATUS_WAIT;
+    g_rf_status = RF_STATUS_WAIT;
 }
 
 __HIGH_CODE
-static void rfProcessTimeout( void )
+static void rf_process_timeout(void)
 {
-
-    if( gBoundStatus && ++gTimeout > gTimeoutMax )
+    if (g_bound_status && ++g_timeout > g_timeout_max)
     {
-        gRxDataStatus = DATA_STATUS_TIMEOUT;
-        PRINT("connect timeout.\n");
+        g_rx_data_status = DATA_STATUS_TIMEOUT;
     }
     else
     {
-        gRfStatus = RF_STATUS_WAIT;
+        g_rf_status = RF_STATUS_WAIT;
     }
 }
 
 __HIGH_CODE
-uint8_t RF_RxQuery( void *buf, typeBufSize *len )
+uint8_t rf_uart_rx_read(void *buf, buf_size_t *len)
 {
-    uint8_t *p;
-
-    if( gRxDataStatus == DATA_STATUS_RCV )
+    if (g_rx_data_status == DATA_STATUS_RCV)
     {
-        if( read_buf( pRfBuf, buf, len ) == 0 )
+        if (byte_buf_read(g_rf_buf_mgr, buf, len) == 0)
         {
             PFIC_DisableIRQ(BLEL_IRQn);
-            gRxDataStatus = DATA_STATUS_START;
+            g_rx_data_status = DATA_STATUS_START;
             PFIC_EnableIRQ(BLEL_IRQn);
         }
     }
-    else if( gRxDataStatus == DATA_STATUS_TIMEOUT )
+    else if (g_rx_data_status == DATA_STATUS_TIMEOUT)
     {
         *len = 0;
-        rf_disconnect( );
+        rf_disconnect();
     }
     else
     {
         *len = 0;
-        if( gRfStatus == RF_STATUS_WAIT )
+        if (g_rf_status == RF_STATUS_WAIT)
         {
-            gRfStatus = RF_STATUS_RX;
-            rf_rx_start( gIntervalTimer );
+            g_rf_status = RF_STATUS_RX;
+            rf_rx_start(g_interval_timer);
         }
     }
     return *len;
 }
 
 __HIGH_CODE
-void RF_UartRxInit( void )
+void rf_uart_rx_init(void)
 {
-    PRINT("----------------- rf uart rx mode -----------------\n");
-    gRxDataStatus = DATA_STATUS_IDLE;
-    rf_buffer_create(&pRfBuf);
-    gDataSeq = 0;
-    gServerData = 0;
-    gBoundStatus = BOUND_STATUS_IDLE;
-    gTxBuf.status = 0;
-    gIntervalTimer = CONN_INTERVAL*1000;
-    gSysClock = GetSysClock( );
-    RFRole_RegisterStatusCbs( &rfCBs );
-    gRfStatus = RF_STATUS_WAIT;
+    g_rx_data_status = DATA_STATUS_IDLE;
+    rf_buffer_create(&g_rf_buf_mgr);
+    g_data_seq = 0;
+    g_server_data = 0;
+    g_bound_status = BOUND_STATUS_IDLE;
+    g_tx_buf.status = 0;
+    g_interval_timer = CONN_INTERVAL * 1000;
+    rf_role_register_status_cbs(&g_rf_cbs);
+    g_rf_status = RF_STATUS_WAIT;
 }

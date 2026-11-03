@@ -1,22 +1,23 @@
-#ifndef __RF_UART_RX_H
-#define __RF_UART_RX_H
+#ifndef RF_UART_RX_H
+#define RF_UART_RX_H
 
 #ifdef __cplusplus
 extern "C"
 {
 #endif
-#include <CH572rf.h>
-#include "CH57x_common.h"
+
+#include <ch572rf.h>
+#include "ch57x_common.h"
 #include "buf.h"
 
-#define   RF_BUF_LEN   512
+#define RF_BUF_LEN       512
 
-#define  CONN_INTERVAL     10
-#define  CONN_TIMEOUT      100
-#define  CONN_PHY_TYPE     1
+#define CONN_INTERVAL    10
+#define CONN_TIMEOUT     100
+#define CONN_PHY_TYPE    1
 
-void RF_UartRxInit( void );
-uint8_t RF_RxQuery( void *buf, typeBufSize *len );
+void rf_uart_rx_init(void);
+uint8_t rf_uart_rx_read(void *buf, buf_size_t *len);
 
 #ifdef __cplusplus
 }

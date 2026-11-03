@@ -1,4 +1,4 @@
-#include "CH57x_common.h"
+#include "ch57x_common.h"
 
 __HIGH_CODE
 void SetSysClock(SYS_CLKTypeDef sc)
@@ -251,20 +251,6 @@ void mDelaymS(uint16_t t)
         mDelayuS(1000);
     }while(--t);
 }
-
-#ifdef DEBUG
-int _write(int fd, char *buf, int size)
-{
-    int i;
-    for(i = 0; i < size; i++)
-    {
-        while(R8_UART_TFC == UART_FIFO_SIZE);
-            R8_UART_THR = *buf++;
-    }
-    return size;
-}
-
-#endif
 
 __attribute__((used))
 void *_sbrk(ptrdiff_t incr)

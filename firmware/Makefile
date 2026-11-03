@@ -4,14 +4,13 @@ CC            := "$(PREFIX)gcc.exe"
 OBJCOPY       := "$(PREFIX)objcopy.exe"
 SIZE          := "$(PREFIX)size.exe"
 
-TARGET        := RF_UartDongle
+TARGET        := rf_uart_dongle
 BUILD         := build
 
 ARCH          := -march=rv32imcb -mabi=ilp32 -mcmodel=medany
 CFLAGS        := $(ARCH) -Os -std=gnu99 \
                  -ffunction-sections -fdata-sections -fno-common -fsigned-char \
-                 -fmessage-length=0 -Wall \
-                 -DDEBUG
+                 -fmessage-length=0 -Wall
 ASFLAGS       := $(ARCH) -x assembler-with-cpp
 
 INCLUDES      := -Iinclude \
@@ -19,19 +18,19 @@ INCLUDES      := -Iinclude \
                  -Iinclude/drivers \
                  -Iinclude/chip
 
-LDSCRIPT      := ld/Link.ld
+LDSCRIPT      := link.ld
 LDFLAGS       := $(ARCH) -T$(LDSCRIPT) -nostartfiles \
                  -Wl,--gc-sections -Wl,--print-memory-usage \
                  -Wl,-Map=$(BUILD)/$(TARGET).map \
                  --specs=nano.specs --specs=nosys.specs \
                  -Llib
 
-LIBS          := -Wl,--start-group -lCH57xRF -lISP572 -lm -Wl,--end-group
+LIBS          := -Wl,--start-group -lch57x_rf -lisp572 -lm -Wl,--end-group
 
 C_SOURCES     := $(wildcard src/*.c src/app/*.c src/drivers/*.c)
-ASM_SOURCES   := $(wildcard src/startup/*.S)
+ASM_SOURCES   := $(wildcard *.s)
 OBJECTS       := $(patsubst src/%.c,$(BUILD)/%.o,$(C_SOURCES)) \
-                 $(patsubst src/%.S,$(BUILD)/%.o,$(ASM_SOURCES))
+                 $(patsubst %.s,$(BUILD)/%.o,$(ASM_SOURCES))
 
 ifeq ($(OS),Windows_NT)
 MKDIR_P       = if not exist "$(subst /,\,$(patsubst %/,%,$(1)))" mkdir "$(subst /,\,$(patsubst %/,%,$(1)))"
@@ -58,7 +57,7 @@ $(BUILD)/%.o: src/%.c
 	@$(call MKDIR_P,$(dir $@))
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
-$(BUILD)/%.o: src/%.S
+$(BUILD)/%.o: %.s
 	@$(call MKDIR_P,$(dir $@))
 	$(CC) $(ASFLAGS) $(INCLUDES) -c $< -o $@
 

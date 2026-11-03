@@ -124,8 +124,8 @@ typedef volatile unsigned long long  *PUINT64V;
 
 #endif
 
-#ifndef __CH572SFR_H__
-#define __CH572SFR_H__
+#ifndef __ch572sfr_H__
+#define __ch572sfr_H__
 
 #ifdef __cplusplus
 extern "C" {
