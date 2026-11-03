@@ -17,20 +17,20 @@ firmware/
 ├─ link.ld                   链接脚本
 ├─ startup_ch572.s           启动文件
 ├─ src/
-│  ├─ main.c                 应用入口、LED、主循环
+│  ├─ main.cpp               应用入口、LED、主循环
 │  ├─ app/
-│  │  ├─ buf.c               环形缓冲区
-│  │  ├─ rf.c                2.4G 收发底层
-│  │  ├─ rf_uart_rx.c        USB <-> 2.4G 透传与配对
-│  │  └─ usb_uart.c          USB 串口设备
+│  │  ├─ buf.cpp             环形缓冲区
+│  │  ├─ rf.cpp              2.4G 收发底层
+│  │  ├─ rf_uart_rx.cpp      USB <-> 2.4G 透传与配对
+│  │  └─ usb_uart.cpp        USB 串口设备
 │  └─ drivers/
-│     ├─ ch57x_clk.c         时钟
-│     ├─ ch57x_gpio.c        GPIO
-│     └─ ch57x_sys.c         系统时钟与启动
+│     ├─ clk.cpp             时钟
+│     ├─ gpio.cpp            GPIO
+│     └─ sys.cpp             系统时钟与启动
 ├─ include/
 │  ├─ app/                   应用头文件
 │  ├─ drivers/               外设库头文件
-│  └─ chip/                  ch572rf.h、core_riscv.h
+│  └─ chip/                  ch572rf.hpp、core_riscv.hpp
 ├─ lib/                      libch57x_rf.a
 └─ build/                    编译产物（不提交）
 ```
@@ -45,7 +45,7 @@ firmware/
 | LED | PA7 (pin 5) | 高电平点亮 |
 | 32MHz 晶体 | XI/XO (pin 9/8) | HSE + PLL 100MHz |
 
-`main.c` 中的行为：
+`main.cpp` 中的行为：
 
 - 上电点亮 LED；
 - USB 未枚举时 LED 500ms 闪烁，枚举成功后常亮；

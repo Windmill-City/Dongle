@@ -1,9 +1,8 @@
-#ifndef __CORE_RISCV_H__
-#define __CORE_RISCV_H__
+#ifndef __CORE_RISCV_HPP__
+#define __CORE_RISCV_HPP__
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include <stdint.h>
+#include <sfr.hpp>
 
 #if defined ( __CC_ARM   )
 #define __ASM            __asm
@@ -30,21 +29,19 @@ extern "C" {
 #endif
 #define __O                 volatile
 #define __IO                volatile
-#define RV_STATIC_INLINE    static inline
+#define RV_STATIC_INLINE    inline
 
-typedef enum
-{
+enum FunctionalState : uint8_t {
     DISABLE = 0,
     ENABLE = !DISABLE
-} FunctionalState;
-typedef enum
-{
+};
+enum FlagStatus : uint8_t {
     RESET = 0,
     SET = !RESET
-} FlagStatus, ITStatus;
+};
+using ITStatus = FlagStatus;
 
-typedef struct
-{
+struct PFIC_Type {
     __I uint32_t  ISR[8];
     __I uint32_t  IPR[8];
     __IO uint32_t ITHRESDR;
@@ -67,10 +64,9 @@ typedef struct
     __IO uint8_t  IPRIOR[256];
     uint8_t       RESERVED7[0x810];
     __IO uint32_t SCTLR;
-} PFIC_Type;
+};
 
-typedef struct
-{
+struct SysTick_Type {
     __IO uint32_t CTLR;
     __IO uint32_t SR;
     union
@@ -85,7 +81,7 @@ typedef struct
         __IO uint32_t CMPL;
     };
     uint8_t       RESERVED0[4];
-} SysTick_Type;
+};
 
 #define PFIC                    ((PFIC_Type *)0xE000E000)
 #define SysTick                 ((SysTick_Type *)0xE000F000)
@@ -390,9 +386,5 @@ RV_STATIC_INLINE uint32_t __SysTick_Config(uint32_t ticks)
                     SysTick_CTLR_STE;
     return (0);
 }
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif

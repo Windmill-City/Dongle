@@ -1,4 +1,4 @@
-#include "ch57x_common.h"
+#include "common.hpp"
 
 void GPIOA_ModeCfg(uint32_t pin, GPIOModeTypeDef mode)
 {

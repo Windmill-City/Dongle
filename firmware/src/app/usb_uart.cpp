@@ -1,19 +1,10 @@
-#include "ch57x_common.h"
-#include "usb_uart.h"
-#include "rf_uart_rx.h"
-#include "rf.h"
-#include "buf.h"
+#include "common.hpp"
+#include "usb_uart.hpp"
+#include "rf_uart_rx.hpp"
+#include "rf.hpp"
 
 #define THIS_ENDP0_SIZE       64
-#define MAX_PACKET_SIZE       64
-
 #define DEF_IC_PRG_VER        0x31
-
-#define CH341_REG_NUM         10
-
-#define USB_BUF_LEN           256
-
-#define USB_IRQ_FLAG_NUM      4
 
 #define ENDP0                 0x00
 #define ENDP1                 0x01
@@ -105,62 +96,26 @@ static const uint8_t usb_serial_str[] =
     '5', 0x00, '4', 0x00, '5', 0x00, 'T', 0x00, 'S', 0x00, '2', 0x00
 };
 
-typedef struct
-{
-    uint8_t config;
-    uint8_t address;
-    uint8_t flag;
-} usb_dev_info_t;
-
-typedef struct
-{
-    uint8_t request_type;
-    uint8_t request;
-    uint8_t value_l;
-    uint8_t value_h;
-    uint8_t index_l;
-    uint8_t index_h;
-    uint8_t length_l;
-    uint8_t length_h;
-} usb_setup_req_t;
-
-#define USB_SETUP_BUF     ((usb_setup_req_t *)g_ep0_buffer)
-
 line_code_t uart0_para;
 
-static usb_dev_info_t g_dev_info;
+static UsbUart s_usb_uart;
 
-static uint8_t g_setup_req_code;
-static uint8_t g_setup_len;
-static const uint8_t *g_descr_ptr;
-
-static __aligned(4) uint8_t g_ep0_buffer[MAX_PACKET_SIZE];
-static __aligned(4) uint8_t g_ep1_buffer[MAX_PACKET_SIZE];
-static __aligned(4) uint8_t g_ep2_buffer[2 * MAX_PACKET_SIZE];
-
-static uint8_t g_ch341_reg_add[CH341_REG_NUM];
-static uint8_t g_ch341_reg_val[CH341_REG_NUM];
-
-static uint8_t g_uart_status;
-static uint32_t g_end2_data_len;
-
-static uint8_t g_usb_irq_w_idx;
-static uint8_t g_usb_irq_r_idx;
-
-static volatile uint8_t g_usb_irq_len[USB_IRQ_FLAG_NUM];
-static volatile uint8_t g_usb_irq_pid[USB_IRQ_FLAG_NUM];
-static volatile uint8_t g_usb_irq_flag[USB_IRQ_FLAG_NUM];
-
-static struct byte_buf *g_usb_buf_mgr;
-static struct byte_buf g_usb_buf_struct;
-static uint8_t g_usb_buf_pool[USB_BUF_LEN];
-
-static void usb_buffer_create(struct byte_buf **buf)
+UsbUart &UsbUart::get()
 {
-    *buf = byte_buf_create(&g_usb_buf_struct, g_usb_buf_pool, sizeof(g_usb_buf_pool));
+    return s_usb_uart;
 }
 
-static void usb_parse_line_coding(uint8_t reg_uart_ctrl)
+extern "C"
+{
+__attribute__((interrupt("WCH-Interrupt-fast")))
+__attribute__((section(".highcode")))
+void USB_IRQHandler(void)
+{
+    UsbUart::get().irq_handler();
+}
+}
+
+void UsbUart::parse_line_coding(uint8_t reg_uart_ctrl)
 {
     uint8_t data_bit_val = reg_uart_ctrl & 0x03;
     uint8_t parity_val = reg_uart_ctrl & 0x38;
@@ -182,7 +137,7 @@ static void usb_parse_line_coding(uint8_t reg_uart_ctrl)
     uart0_para.data_bits = data_bit_val;
 }
 
-static void ch341_reg_write(uint8_t reg_add, uint8_t reg_val)
+void UsbUart::ch341_reg_write(uint8_t reg_add, uint8_t reg_val)
 {
     uint8_t find_idx = 0;
     uint8_t find_flag = 0;
@@ -190,12 +145,12 @@ static void ch341_reg_write(uint8_t reg_add, uint8_t reg_val)
 
     for (i = 0; i < CH341_REG_NUM; i++)
     {
-        if (g_ch341_reg_add[i] == reg_add)
+        if (m_ch341_reg_add[i] == reg_add)
         {
             find_flag = 1;
             break;
         }
-        if (g_ch341_reg_add[i] == 0xFF)
+        if (m_ch341_reg_add[i] == 0xFF)
         {
             break;
         }
@@ -204,21 +159,21 @@ static void ch341_reg_write(uint8_t reg_add, uint8_t reg_val)
 
     if (find_flag)
     {
-        g_ch341_reg_val[find_idx] = reg_val;
+        m_ch341_reg_val[find_idx] = reg_val;
     }
     else
     {
-        g_ch341_reg_add[find_idx] = reg_add;
-        g_ch341_reg_val[find_idx] = reg_val;
+        m_ch341_reg_add[find_idx] = reg_add;
+        m_ch341_reg_val[find_idx] = reg_val;
     }
 
     if (reg_add == 0x18)
     {
-        usb_parse_line_coding(reg_val);
+        parse_line_coding(reg_val);
     }
 }
 
-static uint8_t ch341_reg_read(uint8_t reg_add, uint8_t *reg_val)
+uint8_t UsbUart::ch341_reg_read(uint8_t reg_add, uint8_t *reg_val)
 {
     uint8_t find_flag = 0;
     uint8_t i;
@@ -226,13 +181,13 @@ static uint8_t ch341_reg_read(uint8_t reg_add, uint8_t *reg_val)
     *reg_val = 0;
     for (i = 0; i < CH341_REG_NUM; i++)
     {
-        if (g_ch341_reg_add[i] == reg_add)
+        if (m_ch341_reg_add[i] == reg_add)
         {
             find_flag = 1;
-            *reg_val = g_ch341_reg_val[i];
+            *reg_val = m_ch341_reg_val[i];
             break;
         }
-        if (g_ch341_reg_add[i] == 0xFF)
+        if (m_ch341_reg_add[i] == 0xFF)
         {
             break;
         }
@@ -250,7 +205,7 @@ static uint8_t ch341_reg_read(uint8_t reg_add, uint8_t *reg_val)
     return find_flag;
 }
 
-static uint32_t ch341_calc_baud(uint8_t reg1, uint8_t reg2)
+uint32_t UsbUart::ch341_calc_baud(uint8_t reg1, uint8_t reg2)
 {
     uint32_t ref_clock;
     uint8_t divider;
@@ -297,34 +252,33 @@ static uint32_t ch341_calc_baud(uint8_t reg1, uint8_t reg2)
     return ref_clock / divider;
 }
 
-static void usb_ep_set_in_status(uint8_t ep_num, uint8_t type, uint8_t sta)
+void UsbUart::ep_set_in_status(uint8_t ep_num, uint8_t type, uint8_t sta)
 {
-    uint8_t *p_uepn_ctrl;
+    volatile uint8_t *p_uepn_ctrl;
 
-    p_uepn_ctrl = (uint8_t *)(USB_BASE_ADDR + 0x22 + ep_num * 4);
+    p_uepn_ctrl = reinterpret_cast<volatile uint8_t *>(USB_BASE_ADDR + 0x22 + ep_num * 4);
     if (type == ENDP_TYPE_IN)
     {
-        *((PUINT8V)p_uepn_ctrl) = (*((PUINT8V)p_uepn_ctrl) & ~0x03) | sta;
+        *p_uepn_ctrl = (*p_uepn_ctrl & ~0x03) | sta;
     }
     else
     {
-        *((PUINT8V)p_uepn_ctrl) = (*((PUINT8V)p_uepn_ctrl) & ~(0x03 << 2)) | (sta << 2);
+        *p_uepn_ctrl = (*p_uepn_ctrl & ~(0x03 << 2)) | (sta << 2);
     }
 }
 
-__attribute__((interrupt("WCH-Interrupt-fast")))
-__attribute__((section(".highcode")))
-void USB_IRQHandler(void)
+__HIGH_CODE
+void UsbUart::irq_handler(void)
 {
     if (R8_USB_INT_FG & RB_UIF_TRANSFER)
     {
         if ((R8_USB_INT_ST & MASK_UIS_TOKEN) != MASK_UIS_TOKEN)
         {
-            g_usb_irq_flag[g_usb_irq_w_idx] = 1;
-            g_usb_irq_pid[g_usb_irq_w_idx] = R8_USB_INT_ST;
-            g_usb_irq_len[g_usb_irq_w_idx] = R8_USB_RX_LEN;
+            m_irq_flag[m_irq_w_idx] = 1;
+            m_irq_pid[m_irq_w_idx] = R8_USB_INT_ST;
+            m_irq_len[m_irq_w_idx] = R8_USB_RX_LEN;
 
-            switch (g_usb_irq_pid[g_usb_irq_w_idx] & 0x3F)
+            switch (m_irq_pid[m_irq_w_idx] & 0x3F)
             {
                 case UIS_TOKEN_OUT | 2:
                 {
@@ -333,16 +287,16 @@ void USB_IRQHandler(void)
                         buf_size_t data_len;
 
                         R8_UEP2_CTRL ^= RB_UEP_R_TOG;
-                        data_len = g_usb_irq_len[g_usb_irq_w_idx];
-                        g_end2_data_len = byte_buf_write(g_usb_buf_mgr, g_ep2_buffer, &data_len);
-                        if (g_end2_data_len > (USB_BUF_LEN - MAX_PACKET_SIZE))
+                        data_len = m_irq_len[m_irq_w_idx];
+                        m_buf.write(m_ep2_buffer, data_len);
+                        if (m_buf.size() > (USB_BUF_LEN - USB_PACKET_SIZE))
                         {
                             R8_UEP2_CTRL = (R8_UEP2_CTRL & ~MASK_UEP_R_RES) | UEP_R_RES_NAK;
                         }
                     }
                     else
                     {
-                        g_usb_irq_flag[g_usb_irq_w_idx] = 0;
+                        m_irq_flag[m_irq_w_idx] = 0;
                     }
                 } break;
 
@@ -361,7 +315,7 @@ void USB_IRQHandler(void)
                     }
                     else
                     {
-                        g_usb_irq_flag[g_usb_irq_w_idx] = 0;
+                        m_irq_flag[m_irq_w_idx] = 0;
                     }
                 } break;
 
@@ -379,7 +333,7 @@ void USB_IRQHandler(void)
                     }
                     else
                     {
-                        g_usb_irq_flag[g_usb_irq_w_idx] = 0;
+                        m_irq_flag[m_irq_w_idx] = 0;
                     }
                 } break;
 
@@ -389,10 +343,10 @@ void USB_IRQHandler(void)
                 } break;
             }
 
-            if (g_usb_irq_flag[g_usb_irq_w_idx])
+            if (m_irq_flag[m_irq_w_idx])
             {
-                g_usb_irq_w_idx++;
-                if (g_usb_irq_w_idx >= USB_IRQ_FLAG_NUM) g_usb_irq_w_idx = 0;
+                m_irq_w_idx++;
+                if (m_irq_w_idx >= USB_IRQ_FLAG_NUM) m_irq_w_idx = 0;
             }
 
             R8_USB_INT_FG = RB_UIF_TRANSFER;
@@ -400,12 +354,12 @@ void USB_IRQHandler(void)
 
         if (R8_USB_INT_ST & RB_UIS_SETUP_ACT)
         {
-            g_usb_irq_flag[g_usb_irq_w_idx] = 1;
-            g_usb_irq_pid[g_usb_irq_w_idx] = UIS_TOKEN_SETUP | 0;
-            g_usb_irq_len[g_usb_irq_w_idx] = 8;
+            m_irq_flag[m_irq_w_idx] = 1;
+            m_irq_pid[m_irq_w_idx] = UIS_TOKEN_SETUP | 0;
+            m_irq_len[m_irq_w_idx] = 8;
 
-            g_usb_irq_w_idx++;
-            if (g_usb_irq_w_idx >= USB_IRQ_FLAG_NUM) g_usb_irq_w_idx = 0;
+            m_irq_w_idx++;
+            if (m_irq_w_idx >= USB_IRQ_FLAG_NUM) m_irq_w_idx = 0;
 
             R8_USB_INT_FG = RB_UIF_TRANSFER;
         }
@@ -417,7 +371,7 @@ void USB_IRQHandler(void)
         R8_UEP2_CTRL = UEP_R_RES_ACK | UEP_T_RES_NAK;
 
         R8_USB_DEV_AD = 0x00;
-        g_dev_info.address = 0;
+        m_dev_info.address = 0;
 
         R8_USB_INT_FG = RB_UIF_BUS_RST;
     }
@@ -427,9 +381,9 @@ void USB_IRQHandler(void)
     }
 }
 
-static void usb_handle_setup(uint8_t len)
+void UsbUart::handle_setup(uint8_t len)
 {
-    usb_setup_req_t *setup = USB_SETUP_BUF;
+    usb_setup_req_t *setup = (usb_setup_req_t *)m_ep0_buffer;
     uint8_t data_dir;
     uint8_t buf[8];
 
@@ -442,30 +396,30 @@ static void usb_handle_setup(uint8_t len)
         return;
     }
 
-    g_setup_len = setup->length_l;
-    if (setup->length_h) g_setup_len = 0xFF;
+    m_setup_len = setup->length_l;
+    if (setup->length_h) m_setup_len = 0xFF;
 
     len = 0;
-    g_setup_req_code = setup->request;
+    m_setup_req_code = setup->request;
 
     data_dir = USB_REQ_TYP_OUT;
     if (setup->request_type & USB_REQ_TYP_IN) data_dir = USB_REQ_TYP_IN;
 
     if ((setup->request_type & USB_REQ_TYP_MASK) == USB_REQ_TYP_VENDOR)
     {
-        switch (g_setup_req_code)
+        switch (m_setup_req_code)
         {
             case DEF_VEN_DEBUG_WRITE:
             {
-                uint8_t reg_add1 = g_ep0_buffer[2];
-                uint8_t reg_add2 = g_ep0_buffer[3];
-                uint8_t reg_val1 = g_ep0_buffer[4];
-                uint8_t reg_val2 = g_ep0_buffer[5];
+                uint8_t reg_add1 = m_ep0_buffer[2];
+                uint8_t reg_add2 = m_ep0_buffer[3];
+                uint8_t reg_val1 = m_ep0_buffer[4];
+                uint8_t reg_val2 = m_ep0_buffer[5];
 
                 if ((reg_add1 == 0x12) && (reg_add2 == 0x13))
                 {
                     uart0_para.baud_rate = ch341_calc_baud(setup->index_l, setup->index_h);
-                    g_uart_status = 1;
+                    m_uart_status = 1;
                 }
                 else
                 {
@@ -485,17 +439,17 @@ static void usb_handle_setup(uint8_t len)
                 len = 2;
                 buf[0] = reg_val1;
                 buf[1] = reg_val2;
-                g_setup_len = len;
-                memcpy(g_ep0_buffer, buf, len);
+                m_setup_len = len;
+                memcpy(m_ep0_buffer, buf, len);
             } break;
 
             case DEF_VEN_UART_INIT:
             {
                 uint8_t uart_reg1_val;
 
-                if (g_ep0_buffer[2] & 0x80)
+                if (m_ep0_buffer[2] & 0x80)
                 {
-                    usb_parse_line_coding(g_ep0_buffer[3]);
+                    parse_line_coding(m_ep0_buffer[3]);
 
                     uart_reg1_val = setup->index_l;
                     if (!(uart_reg1_val & (1 << 6)))
@@ -504,14 +458,14 @@ static void usb_handle_setup(uint8_t len)
                     }
 
                     uart0_para.baud_rate = ch341_calc_baud(uart_reg1_val, setup->index_h);
-                    g_uart_status = 1;
+                    m_uart_status = 1;
                 }
             } break;
 
             case DEF_VEN_UART_M_OUT:
             {
-                uart0_para.io_status = g_ep0_buffer[2];
-                g_uart_status = 1;
+                uart0_para.io_status = m_ep0_buffer[2];
+                m_uart_status = 1;
             } break;
 
             case DEF_VEN_BUF_CLEAR:
@@ -524,8 +478,8 @@ static void usb_handle_setup(uint8_t len)
                 len = 2;
                 buf[0] = 0x30;
                 buf[1] = 0x00;
-                g_setup_len = len;
-                memcpy(g_ep0_buffer, buf, len);
+                m_setup_len = len;
+                memcpy(m_ep0_buffer, buf, len);
             } break;
 
             default:
@@ -534,19 +488,19 @@ static void usb_handle_setup(uint8_t len)
     }
     else if ((setup->request_type & USB_REQ_TYP_MASK) == USB_REQ_TYP_STANDARD)
     {
-        switch (g_setup_req_code)
+        switch (m_setup_req_code)
         {
             case USB_GET_DESCRIPTOR:
             {
                 switch (setup->value_h)
                 {
                     case 1:
-                        g_descr_ptr = usb_vendor_dev_desc;
+                        m_descr_ptr = usb_vendor_dev_desc;
                         len = sizeof(usb_vendor_dev_desc);
                         break;
 
                     case 2:
-                        g_descr_ptr = usb_vendor_cfg_desc;
+                        m_descr_ptr = usb_vendor_cfg_desc;
                         len = sizeof(usb_vendor_cfg_desc);
                         break;
 
@@ -554,19 +508,19 @@ static void usb_handle_setup(uint8_t len)
                         switch (setup->value_l)
                         {
                             case 0:
-                                g_descr_ptr = usb_lang_str_desc;
+                                m_descr_ptr = usb_lang_str_desc;
                                 len = sizeof(usb_lang_str_desc);
                                 break;
                             case 1:
-                                g_descr_ptr = usb_manufacturer_str;
+                                m_descr_ptr = usb_manufacturer_str;
                                 len = sizeof(usb_manufacturer_str);
                                 break;
                             case 2:
-                                g_descr_ptr = usb_product_str;
+                                m_descr_ptr = usb_product_str;
                                 len = sizeof(usb_product_str);
                                 break;
                             case 3:
-                                g_descr_ptr = usb_serial_str;
+                                m_descr_ptr = usb_serial_str;
                                 len = sizeof(usb_serial_str);
                                 break;
                             default:
@@ -576,7 +530,7 @@ static void usb_handle_setup(uint8_t len)
                         break;
 
                     case 6:
-                        g_descr_ptr = usb_qualifier_desc;
+                        m_descr_ptr = usb_qualifier_desc;
                         len = sizeof(usb_qualifier_desc);
                         break;
 
@@ -587,29 +541,29 @@ static void usb_handle_setup(uint8_t len)
 
                 if (len != 0xFF)
                 {
-                    if (g_setup_len > len) g_setup_len = len;
-                    len = (g_setup_len >= THIS_ENDP0_SIZE) ? THIS_ENDP0_SIZE : g_setup_len;
-                    memcpy(g_ep0_buffer, g_descr_ptr, len);
-                    g_setup_len -= len;
-                    g_descr_ptr += len;
+                    if (m_setup_len > len) m_setup_len = len;
+                    len = (m_setup_len >= THIS_ENDP0_SIZE) ? THIS_ENDP0_SIZE : m_setup_len;
+                    memcpy(m_ep0_buffer, m_descr_ptr, len);
+                    m_setup_len -= len;
+                    m_descr_ptr += len;
                 }
             } break;
 
             case USB_SET_ADDRESS:
             {
-                g_dev_info.flag |= DEF_BIT_USB_ADDRESS;
-                g_dev_info.address = setup->value_l;
+                m_dev_info.flag |= DEF_BIT_USB_ADDRESS;
+                m_dev_info.address = setup->value_l;
             } break;
 
             case USB_GET_CONFIGURATION:
             {
-                g_ep0_buffer[0] = g_dev_info.config;
-                if (g_setup_len >= 1) len = 1;
+                m_ep0_buffer[0] = m_dev_info.config;
+                if (m_setup_len >= 1) len = 1;
             } break;
 
             case USB_SET_CONFIGURATION:
             {
-                g_dev_info.config = setup->value_l;
+                m_dev_info.config = setup->value_l;
             } break;
 
             case USB_CLEAR_FEATURE:
@@ -638,15 +592,15 @@ static void usb_handle_setup(uint8_t len)
 
             case USB_GET_INTERFACE:
             {
-                g_ep0_buffer[0] = 0x00;
-                if (g_setup_len >= 1) len = 1;
+                m_ep0_buffer[0] = 0x00;
+                if (m_setup_len >= 1) len = 1;
             } break;
 
             case USB_GET_STATUS:
             {
-                g_ep0_buffer[0] = 0x00;
-                g_ep0_buffer[1] = 0x00;
-                len = (g_setup_len >= 2) ? 2 : g_setup_len;
+                m_ep0_buffer[0] = 0x00;
+                m_ep0_buffer[1] = 0x00;
+                len = (m_setup_len >= 2) ? 2 : m_setup_len;
             } break;
 
             default:
@@ -658,7 +612,7 @@ static void usb_handle_setup(uint8_t len)
     {
         if (data_dir == USB_REQ_TYP_OUT)
         {
-            switch (g_setup_req_code)
+            switch (m_setup_req_code)
             {
                 case DEF_SET_LINE_CODING:
                     len = 0;
@@ -675,13 +629,13 @@ static void usb_handle_setup(uint8_t len)
         }
         else
         {
-            switch (g_setup_req_code)
+            switch (m_setup_req_code)
             {
                 case DEF_GET_LINE_CODING:
                 {
-                    line_code_t *line_code = (line_code_t *)g_ep0_buffer;
+                    line_code_t *line_code = (line_code_t *)m_ep0_buffer;
 
-                    g_descr_ptr = g_ep0_buffer;
+                    m_descr_ptr = m_ep0_buffer;
                     len = sizeof(line_code_t);
                     line_code->baud_rate = uart0_para.baud_rate;
                     line_code->stop_bits = uart0_para.stop_bits;
@@ -692,8 +646,8 @@ static void usb_handle_setup(uint8_t len)
                 case DEF_SERIAL_STATE:
                 {
                     len = 2;
-                    g_ep0_buffer[0] = 0;
-                    g_ep0_buffer[1] = 0;
+                    m_ep0_buffer[0] = 0;
+                    m_ep0_buffer[1] = 0;
                 } break;
 
                 default:
@@ -709,14 +663,14 @@ static void usb_handle_setup(uint8_t len)
 
     if (len == 0xFF)
     {
-        g_setup_req_code = 0xFF;
+        m_setup_req_code = 0xFF;
         PFIC_DisableIRQ(USB_IRQn);
         R8_UEP0_CTRL = RB_UEP_R_TOG | RB_UEP_T_TOG | UEP_R_RES_STALL | UEP_T_RES_STALL;
         PFIC_EnableIRQ(USB_IRQn);
     }
     else if (len <= THIS_ENDP0_SIZE)
     {
-        if (g_setup_req_code == USB_GET_DESCRIPTOR)
+        if (m_setup_req_code == USB_GET_DESCRIPTOR)
         {
             R8_UEP0_T_LEN = len;
             PFIC_DisableIRQ(USB_IRQn);
@@ -740,16 +694,16 @@ static void usb_handle_setup(uint8_t len)
     }
 }
 
-static void usb_irq_process(void)
+void UsbUart::irq_process(void)
 {
     uint8_t len;
     uint8_t i;
 
-    i = g_usb_irq_r_idx;
-    g_usb_irq_r_idx++;
-    if (g_usb_irq_r_idx >= USB_IRQ_FLAG_NUM) g_usb_irq_r_idx = 0;
+    i = m_irq_r_idx;
+    m_irq_r_idx++;
+    if (m_irq_r_idx >= USB_IRQ_FLAG_NUM) m_irq_r_idx = 0;
 
-    switch (g_usb_irq_pid[i] & 0x3F)
+    switch (m_irq_pid[i] & 0x3F)
     {
         case UIS_TOKEN_OUT | 1:
         {
@@ -760,27 +714,27 @@ static void usb_irq_process(void)
 
         case UIS_TOKEN_SETUP | 0:
         {
-            len = g_usb_irq_len[i];
-            usb_handle_setup(len);
+            len = m_irq_len[i];
+            handle_setup(len);
         } break;
 
         case UIS_TOKEN_IN | 0:
         {
-            switch (g_setup_req_code)
+            switch (m_setup_req_code)
             {
                 case USB_GET_DESCRIPTOR:
                 {
-                    len = (g_setup_len >= THIS_ENDP0_SIZE) ? THIS_ENDP0_SIZE : g_setup_len;
-                    memcpy(g_ep0_buffer, g_descr_ptr, len);
-                    g_setup_len -= len;
-                    g_descr_ptr += len;
+                    len = (m_setup_len >= THIS_ENDP0_SIZE) ? THIS_ENDP0_SIZE : m_setup_len;
+                    memcpy(m_ep0_buffer, m_descr_ptr, len);
+                    m_setup_len -= len;
+                    m_descr_ptr += len;
 
                     if (len)
                     {
                         R8_UEP0_T_LEN = len;
                         PFIC_DisableIRQ(USB_IRQn);
                         R8_UEP0_CTRL ^= RB_UEP_T_TOG;
-                        usb_ep_set_in_status(ENDP0, ENDP_TYPE_IN, IN_ACK);
+                        ep_set_in_status(ENDP0, ENDP_TYPE_IN, IN_ACK);
                         PFIC_EnableIRQ(USB_IRQn);
                     }
                     else
@@ -794,7 +748,7 @@ static void usb_irq_process(void)
 
                 case USB_SET_ADDRESS:
                 {
-                    R8_USB_DEV_AD = (R8_USB_DEV_AD & RB_UDA_GP_BIT) | g_dev_info.address;
+                    R8_USB_DEV_AD = (R8_USB_DEV_AD & RB_UDA_GP_BIT) | m_dev_info.address;
                     PFIC_DisableIRQ(USB_IRQn);
                     R8_UEP0_CTRL = RB_UEP_R_TOG | RB_UEP_T_TOG | UEP_R_RES_NAK | UEP_T_RES_NAK;
                     PFIC_EnableIRQ(USB_IRQn);
@@ -828,16 +782,16 @@ static void usb_irq_process(void)
 
         case UIS_TOKEN_OUT | 0:
         {
-            len = g_usb_irq_len[i];
-            if (len && (g_setup_req_code == DEF_SET_LINE_CODING))
+            len = m_irq_len[i];
+            if (len && (m_setup_req_code == DEF_SET_LINE_CODING))
             {
                 uint32_t baud_rate;
 
-                memcpy(&baud_rate, g_ep0_buffer, 4);
+                memcpy(&baud_rate, m_ep0_buffer, 4);
                 uart0_para.baud_rate = baud_rate;
-                uart0_para.stop_bits = g_ep0_buffer[4];
-                uart0_para.parity_type = g_ep0_buffer[5];
-                uart0_para.data_bits = g_ep0_buffer[6];
+                uart0_para.stop_bits = m_ep0_buffer[4];
+                uart0_para.parity_type = m_ep0_buffer[5];
+                uart0_para.data_bits = m_ep0_buffer[6];
 
                 PFIC_DisableIRQ(USB_IRQn);
                 R8_UEP0_CTRL = RB_UEP_R_TOG | RB_UEP_T_TOG | UEP_R_RES_NAK | UEP_T_RES_ACK;
@@ -856,16 +810,16 @@ static void usb_irq_process(void)
     }
 }
 
-static void usb_vendor_init(void)
+void UsbUart::vendor_init(void)
 {
     R8_USB_CTRL = 0x00;
 
     R8_UEP4_1_MOD = RB_UEP1_TX_EN | RB_UEP1_RX_EN;
     R8_UEP2_3_MOD = RB_UEP2_RX_EN | RB_UEP2_TX_EN;
 
-    R16_UEP0_DMA = (UINT32)&g_ep0_buffer[0];
-    R16_UEP1_DMA = (UINT32)&g_ep1_buffer[0];
-    R16_UEP2_DMA = (UINT32)&g_ep2_buffer[0];
+    R16_UEP0_DMA = reinterpret_cast<uint32_t>(&m_ep0_buffer[0]);
+    R16_UEP1_DMA = reinterpret_cast<uint32_t>(&m_ep1_buffer[0]);
+    R16_UEP2_DMA = reinterpret_cast<uint32_t>(&m_ep2_buffer[0]);
 
     R8_UEP0_CTRL = UEP_R_RES_NAK | UEP_T_RES_NAK;
     R8_UEP1_CTRL = UEP_R_RES_ACK | UEP_T_RES_NAK;
@@ -881,12 +835,12 @@ static void usb_vendor_init(void)
 
     R8_UDEV_CTRL |= RB_UD_PORT_EN;
 
-    g_dev_info.config = 0;
-    g_dev_info.address = 0;
-    g_dev_info.flag = 0;
+    m_dev_info.config = 0;
+    m_dev_info.address = 0;
+    m_dev_info.flag = 0;
 }
 
-static void usb_dev_para_init(void)
+void UsbUart::dev_para_init(void)
 {
     uint8_t i;
 
@@ -895,49 +849,48 @@ static void usb_dev_para_init(void)
     uart0_para.parity_type = HAL_UART_NO_PARITY;
     uart0_para.stop_bits = HAL_UART_ONE_STOP_BIT;
     uart0_para.io_status = 0;
-    g_uart_status = 1;
+    m_uart_status = 1;
 
     for (i = 0; i < CH341_REG_NUM; i++)
     {
-        g_ch341_reg_add[i] = 0xFF;
-        g_ch341_reg_val[i] = 0x00;
+        m_ch341_reg_add[i] = 0xFF;
+        m_ch341_reg_val[i] = 0x00;
     }
 
     for (i = 0; i < USB_IRQ_FLAG_NUM; i++)
     {
-        g_usb_irq_flag[i] = 0;
+        m_irq_flag[i] = 0;
     }
 }
 
-void usb_uart_init(void)
+void UsbUart::init(void)
 {
     R16_PIN_ALTERNATE &= ~RB_PIN_DEBUG_EN;
 
-    usb_dev_para_init();
-    usb_buffer_create(&g_usb_buf_mgr);
-    usb_vendor_init();
+    dev_para_init();
+    vendor_init();
 
     PFIC_EnableIRQ(USB_IRQn);
 }
 
-void usb_uart_poll(void)
+void UsbUart::poll(void)
 {
     buf_size_t len;
     uint8_t i;
 
-    i = g_usb_irq_r_idx;
-    if (g_usb_irq_flag[i])
+    i = m_irq_r_idx;
+    if (m_irq_flag[i])
     {
-        usb_irq_process();
-        g_usb_irq_flag[i] = 0;
+        irq_process();
+        m_irq_flag[i] = 0;
     }
 
-    if (g_dev_info.address)
+    if (m_dev_info.address)
     {
         if ((R8_UEP2_CTRL & MASK_UEP_T_RES) == UEP_T_RES_NAK)
         {
-            len = MAX_PACKET_SIZE / 2;
-            if (rf_uart_rx_read(&g_ep2_buffer[MAX_PACKET_SIZE], &len))
+            len = USB_PACKET_SIZE / 2;
+            if (RfUart::get().read(&m_ep2_buffer[USB_PACKET_SIZE], &len))
             {
                 R8_UEP2_T_LEN = (uint8_t)len;
                 PFIC_DisableIRQ(USB_IRQn);
@@ -949,23 +902,22 @@ void usb_uart_poll(void)
 }
 
 __HIGH_CODE
-uint8_t usb_uart_read(void *buf, buf_size_t *len)
+uint8_t UsbUart::read(void *buf, buf_size_t *len)
 {
-    if (g_dev_info.address)
+    if (m_dev_info.address)
     {
-        if (g_uart_status)
+        if (m_uart_status)
         {
-            g_uart_status = 0;
+            m_uart_status = 0;
             *len = 0;
             return 0x80;
         }
     }
 
-    if (g_end2_data_len)
+    if (m_buf.size())
     {
-        *len = DATA_LEN_MAX_TX;
-        g_end2_data_len = byte_buf_read(g_usb_buf_mgr, buf, len);
-        if (g_end2_data_len < (USB_BUF_LEN - MAX_PACKET_SIZE))
+        *len = m_buf.read(buf, DATA_LEN_MAX_TX);
+        if (m_buf.size() < (USB_BUF_LEN - USB_PACKET_SIZE))
         {
             PFIC_DisableIRQ(USB_IRQn);
             R8_UEP2_CTRL = (R8_UEP2_CTRL & ~MASK_UEP_R_RES) | UEP_R_RES_ACK;

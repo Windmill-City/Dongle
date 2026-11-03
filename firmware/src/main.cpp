@@ -1,6 +1,6 @@
-#include "rf.h"
-#include "rf_uart_rx.h"
-#include "usb_uart.h"
+#include "rf.hpp"
+#include "rf_uart_rx.hpp"
+#include "usb_uart.hpp"
 
 #define LED_PIN             GPIO_Pin_7
 #define USB_ADDR_MASK       0x7F
@@ -33,7 +33,7 @@ static void main_loop(void)
 
     while (1)
     {
-        usb_uart_poll();
+        UsbUart::get().poll();
 
         tick_now = SYS_GetSysTickCnt();
 
@@ -70,9 +70,9 @@ int main(void)
 
     __SysTick_Config(SysTick_LOAD_RELOAD_Msk);
 
-    usb_uart_init();
-    rf_role_init();
-    rf_uart_rx_init();
+    UsbUart::get().init();
+    Rf::get().init();
+    RfUart::get().init();
 
     main_loop();
 }

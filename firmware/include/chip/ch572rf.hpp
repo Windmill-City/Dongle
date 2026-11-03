@@ -1,22 +1,14 @@
-#ifndef __CH572_RF_H
-#define __CH572_RF_H
+#ifndef __CH572_RF_HPP__
+#define __CH572_RF_HPP__
 
-#ifdef __cplusplus
-extern "C"
-{
-#endif
-#include  "stdint.h"
+#include <stdint.h>
 
-#ifndef  bStatus_t
-typedef uint8_t                 bStatus_t;
-#endif
+using bStatus_t = uint8_t;
+using rfRole_States_t = uint32_t;
 
-typedef uint32_t rfRole_States_t;
-
-typedef void (*pfnRfRoleProcess)( rfRole_States_t status, uint8_t id );
+using pfnRfRoleProcess = void (*)(rfRole_States_t status, uint8_t id);
 
 #define  VER_RF_FILE            "CH57x_RF_BASIC_LIB_V1.1"
-extern const uint8_t VER_RF_LIB[];
 
 #define BREAK_UINT32( var, ByteNum ) (uint8_t)((uint32_t)(((var) >>((ByteNum) * 8)) & 0x00FF))
 #define HI_UINT16(a) (((a) >> 8) & 0xFF)
@@ -69,17 +61,17 @@ extern const uint8_t VER_RF_LIB[];
 #define LL_TX_PWR_5_DBM              0x25
 #define LL_TX_PWR_6_DBM              0x2D
 
-#define  RF_MAX_DATA_LEN              251
+#define  RF_MAX_DATA_LEN             251
 
-#define  BB_WHITENING_OFF             (1<<0)
-#define  BB_WHITENING_CH              (1<<2)
+#define  BB_WHITENING_OFF            (1<<0)
+#define  BB_WHITENING_CH             (1<<2)
 
-#define PHY_MODE_MASK                 (0x30)
-#define  PHY_MODE_PHY_1M              (0<<4)
-#define  PHY_MODE_PHY_2M              (1<<4)
-#define  PHY_MODE_2G4                 (3<<4)
+#define PHY_MODE_MASK                (0x30)
+#define  PHY_MODE_PHY_1M             (0<<4)
+#define  PHY_MODE_PHY_2M             (1<<4)
+#define  PHY_MODE_2G4                (3<<4)
 
-typedef struct
+struct rfRoleConfig_t
 {
     pfnRfRoleProcess rfProcessCB;
     uint32_t processMask;
@@ -87,10 +79,12 @@ typedef struct
 #define    RF_STATE_TIMEOUT        (1<<2)
 #define    RF_STATE_RX_CRCERR      (1<<3)
 #define    RF_STATE_TX_FINISH      (1<<4)
-} rfRoleConfig_t;
+};
 
-typedef union {
-    struct {
+union TPROPERTIES_CFG
+{
+    struct
+    {
         uint32_t whitOff               : 1;
         uint32_t resv0                 : 1;
         uint32_t whitChannel           : 1;
@@ -113,9 +107,9 @@ typedef union {
         uint32_t resv5                 : 1;
     };
     uint32_t cfgVal;
-} TPROPERTIES_CFG;
+};
 
-typedef struct
+struct rfipTx_t
 {
     uint32_t accessAddress;
     uint8_t accessAddressEx;
@@ -129,9 +123,9 @@ typedef struct
     uint8_t waitTime;
     int8_t txPowerVal;
     uint32_t crcPoly;
-} rfipTx_t;
+};
 
-typedef struct
+struct rfipRx_t
 {
     uint32_t accessAddress;
     uint8_t accessAddressEx;
@@ -144,36 +138,38 @@ typedef struct
     uint8_t rxMaxLen;
     uint32_t timeOut;
     uint32_t crcPoly;
-} rfipRx_t;
+};
 
-void LLE_LibIRQHandler( void );
+// Symbols provided by the prebuilt C library libch57x_rf.a.
+extern "C"
+{
+extern const uint8_t VER_RF_LIB[];
 
-void BB_LibIRQHandler( void );
+void LLE_LibIRQHandler(void);
 
-uint8_t RFIP_ReadCrc( void );
+void BB_LibIRQHandler(void);
 
-void RFIP_SetTxPower( uint8_t val );
+uint8_t RFIP_ReadCrc(void);
 
-bStatus_t RFRole_Stop( void );
+void RFIP_SetTxPower(uint8_t val);
 
-bStatus_t RFRole_Shut(void );
+bStatus_t RFRole_Stop(void);
 
-void RFIP_Calibration( void );
+bStatus_t RFRole_Shut(void);
 
-void RFIP_WakeUpRegInit( void );
+void RFIP_Calibration(void);
 
-bStatus_t RFIP_SingleChannel( uint8_t ch );
+void RFIP_WakeUpRegInit(void);
 
-void RFIP_TestEnd( void );
+bStatus_t RFIP_SingleChannel(uint8_t ch);
 
-bStatus_t RFRole_BasicInit( rfRoleConfig_t *pConf );
+void RFIP_TestEnd(void);
 
-bStatus_t RFIP_StartTx( rfipTx_t *pParm  );
+bStatus_t RFRole_BasicInit(rfRoleConfig_t *pConf);
 
-bStatus_t RFIP_SetRx( rfipRx_t *pParm );
+bStatus_t RFIP_StartTx(rfipTx_t *pParm);
 
-#ifdef __cplusplus
+bStatus_t RFIP_SetRx(rfipRx_t *pParm);
 }
-#endif
 
 #endif

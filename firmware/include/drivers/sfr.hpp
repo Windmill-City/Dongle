@@ -1,9 +1,7 @@
 #ifndef __BASE_TYPE__
 #define __BASE_TYPE__
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include <stdint.h>
 
 #ifndef TRUE
 #define TRUE                    1
@@ -13,123 +11,38 @@ extern "C" {
 #define NULL                    0
 #endif
 
-#ifndef VOID
-#define VOID                    void
-#endif
-#ifndef CONST
-#define CONST                   const
-#endif
-#ifndef BOOL
-typedef unsigned char           BOOL;
-#endif
-#ifndef BOOLEAN
-typedef unsigned char           BOOLEAN;
-#endif
-#ifndef CHAR
-typedef char                    CHAR;
-#endif
-#ifndef INT8
-typedef char                    INT8;
-#endif
-#ifndef INT16
-typedef short                   INT16;
-#endif
-#ifndef INT32
-typedef long                    INT32;
-#endif
-#ifndef UINT8
-typedef unsigned char           UINT8;
-#endif
-#ifndef UINT16
-typedef unsigned short          UINT16;
-#endif
-#ifndef UINT32
-typedef unsigned long           UINT32;
-#endif
-#ifndef UINT64
-typedef unsigned long long      UINT64;
-#endif
-#ifndef UINT8V
-typedef unsigned char volatile  UINT8V;
-#endif
-#ifndef UINT16V
-typedef unsigned short volatile UINT16V;
-#endif
-#ifndef UINT32V
-typedef unsigned long volatile  UINT32V;
-#endif
-#ifndef UINT64V
-typedef unsigned long long volatile  UINT64V;
-#endif
+using BOOL    = uint8_t;
+using BOOLEAN = uint8_t;
+using CHAR    = char;
+using INT8    = int8_t;
+using INT16   = int16_t;
+using INT32   = int32_t;
+using UINT8   = uint8_t;
+using UINT16  = uint16_t;
+using UINT32  = uint32_t;
+using UINT64  = uint64_t;
+using UINT8V  = volatile uint8_t;
+using UINT16V = volatile uint16_t;
+using UINT32V = volatile uint32_t;
+using UINT64V = volatile uint64_t;
 
-#ifndef PVOID
-typedef void                    *PVOID;
-#endif
-#ifndef PCHAR
-typedef char                    *PCHAR;
-#endif
-#ifndef PCHAR
-typedef const char              *PCCHAR;
-#endif
-#ifndef PINT8
-typedef char                    *PINT8;
-#endif
-#ifndef PINT16
-typedef short                   *PINT16;
-#endif
-#ifndef PINT32
-typedef long                    *PINT32;
-#endif
-#ifndef PUINT8
-typedef unsigned char           *PUINT8;
-#endif
-#ifndef PUINT16
-typedef unsigned short          *PUINT16;
-#endif
-#ifndef PUINT32
-typedef unsigned long           *PUINT32;
-#endif
-#ifndef PUINT8V
-typedef volatile unsigned char  *PUINT8V;
-#endif
-#ifndef PUINT16V
-typedef volatile unsigned short *PUINT16V;
-#endif
-#ifndef PUINT32V
-typedef volatile unsigned long  *PUINT32V;
-#endif
-#ifndef PUINT64V
-typedef volatile unsigned long long  *PUINT64V;
-#endif
-
-#ifndef min
-#define min(a,b)                (((a) < (b)) ? (a) : (b))
-#endif
-#ifndef max
-#define max(a,b)                (((a) > (b)) ? (a) : (b))
-#endif
-
-#define FIELD_OFFSET(Type, Field)    ((UINT16)&(((Type *)0)->Field))
-
-#define FIELD_SIZE(Type, Field)      (sizeof(((Type *)0)->Field))
-
-#define FIELD_TYPE(Type, Field)      (((Type *)0)->Field)
-
-#define NUMBER_OF(Array)             (sizeof(Array)/sizeof((Array)[0]))
-#define NUMBER_OF_FIELD(Type, Field) (NUMBER_OF(FIELD_TYPE(Type, Field)))
-
-#ifdef __cplusplus
-}
-#endif
+using PVOID    = void *;
+using PCHAR    = char *;
+using PCCHAR   = const char *;
+using PINT8    = int8_t *;
+using PINT16   = int16_t *;
+using PINT32   = int32_t *;
+using PUINT8   = uint8_t *;
+using PUINT16  = uint16_t *;
+using PUINT32  = uint32_t *;
+using PUINT8V  = volatile uint8_t *;
+using PUINT16V = volatile uint16_t *;
+using PUINT32V = volatile uint32_t *;
+using PUINT64V = volatile uint64_t *;
 
 #endif
-
-#ifndef __ch572sfr_H__
-#define __ch572sfr_H__
-
-#ifdef __cplusplus
-extern "C" {
-#endif
+#ifndef __SFR_HPP__
+#define __SFR_HPP__
 
 #define R32_IWDG_KR         (*((PUINT32V)0x40001000))
 #define R32_IWDG_CFG        (*((PUINT32V)0x40001004))
@@ -880,8 +793,7 @@ extern "C" {
 #ifndef TABLE_IRQN
 #define __PFIC_PRIO_BITS          2
 #define __Vendor_SysTickConfig    0
-typedef enum IRQn
-{
+enum IRQn {
   Reset_IRQn                    =  0,
   NMI_IRQn                      =  2,
   EXC_IRQn                      =  3,
@@ -904,21 +816,14 @@ typedef enum IRQn
   KEYSCAN_IRQn                  =  33,
   ENCODE_IRQn                   =  34,
   WDOG_BAT_IRQn                 =  35
-} IRQn_Type;
-#endif
-
-#ifdef __cplusplus
-}
+};
+using IRQn_Type = IRQn;
 #endif
 
 #endif
 
-#ifndef __CH572USBSFR_H__
-#define __CH572USBSFR_H__
-
-#ifdef __cplusplus
-extern "C" {
-#endif
+#ifndef __USB_SFR_HPP__
+#define __USB_SFR_HPP__
 
 #define USB_BASE_ADDR              (0x40008000)
 #define BA_USB              ((PUINT8V)0x40008000)
@@ -1114,18 +1019,10 @@ extern "C" {
 #define R8_UEP7_T_LEN       (*((PUINT8V)0x4000806C))
 #define R8_UEP7_CTRL        (*((PUINT8V)0x4000806E))
 
-#ifdef __cplusplus
-}
-#endif
-
 #endif
 
 #ifndef __USB_TYPE__
 #define __USB_TYPE__
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 #ifndef USB_PID_SETUP
 #define USB_PID_NULL            0x00
@@ -1394,9 +1291,5 @@ typedef struct __PACKED  _UDISK_BOC_CSW {
 } UDISK_BOC_CSW, *PUDISK_BOC_CSW;
 
 typedef UDISK_BOC_CSW  *PXUDISK_BOC_CSW;
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif

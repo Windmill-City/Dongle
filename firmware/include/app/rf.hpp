@@ -1,14 +1,9 @@
-#ifndef RF_H
-#define RF_H
+#ifndef RF_HPP
+#define RF_HPP
 
-#ifdef __cplusplus
-extern "C"
-{
-#endif
-
-#include <ch572rf.h>
-#include "ch57x_common.h"
-#include "buf.h"
+#include <stdint.h>
+#include <ch572rf.hpp>
+#include "common.hpp"
 
 #define DEF_FREQUENCY   17
 #define TEST_PHY_MODE   PHY_MODE_PHY_2M
@@ -176,21 +171,31 @@ typedef struct
 #define OPCODE_BSP            0x01
 #define OPCODE_ACK            0xF0
 
-void rf_tx_set_frequency(uint32_t frequency);
-void rf_tx_set_sync_word(uint32_t sync_word);
-void rf_tx_start(void *buf, uint16_t rfon_us);
-void rf_tx_set_phy_type(uint8_t phy);
+class Rf
+{
+public:
+    static Rf &get();
 
-void rf_rx_set_sync_word(uint32_t sync_word);
-void rf_rx_set_frequency(uint32_t frequency);
-void rf_rx_start(uint32_t rx_us);
-void rf_rx_set_phy_type(uint8_t phy);
+    void init();
+    void set_status_cbs(rf_status_cbs_t *cbs);
 
-void rf_role_init(void);
-void rf_role_register_status_cbs(rf_status_cbs_t *cbs);
+    __HIGH_CODE void tx_set_frequency(uint32_t frequency);
+    __HIGH_CODE void tx_set_sync_word(uint32_t sync_word);
+    __HIGH_CODE void tx_set_phy_type(uint8_t phy);
+    __HIGH_CODE void tx_start(void *buf, uint16_t rfon_us);
 
-#ifdef __cplusplus
-}
-#endif
+    __HIGH_CODE void rx_set_sync_word(uint32_t sync_word);
+    __HIGH_CODE void rx_set_frequency(uint32_t frequency);
+    __HIGH_CODE void rx_set_phy_type(uint8_t phy);
+    __HIGH_CODE void rx_start(uint32_t rx_us);
+
+private:
+    static void process_callback(rfRole_States_t sta, uint8_t id);
+
+    rfipTx_t m_tx;
+    rfipRx_t m_rx;
+    rf_status_cbs_t *m_cbs;
+    uint8_t m_rx_buf[264] __attribute__((aligned(4)));
+};
 
 #endif

@@ -1,13 +1,12 @@
-#ifndef __ch57x_SYS_H__
-#define __ch57x_SYS_H__
+#ifndef __ch57x_SYS_HPP__
+#define __ch57x_SYS_HPP__
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include <stdint.h>
+#include "sfr.hpp"
+#include "clk.hpp"
 
-#define SYS_GetChipID()      R8_CHIP_ID
-
-#define SYS_GetAccessID()    R8_SAFE_ACCESS_ID
+inline uint8_t SYS_GetChipID() { return R8_CHIP_ID; }
+inline uint8_t SYS_GetAccessID() { return R8_SAFE_ACCESS_ID; }
 
 void SetSysClock(SYS_CLKTypeDef sc);
 
@@ -17,9 +16,5 @@ uint32_t SYS_GetSysTickCnt(void);
                                         R8_SAFE_ACCESS_SIG = SAFE_ACCESS_SIG1;R8_SAFE_ACCESS_SIG = SAFE_ACCESS_SIG2;SAFEOPERATE;
 
 #define sys_safe_access_disable()       R8_SAFE_ACCESS_SIG = 0;__risc_v_enable_irq(mpie_mie);SAFEOPERATE;}while(0)
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif

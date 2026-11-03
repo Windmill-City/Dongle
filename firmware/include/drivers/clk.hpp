@@ -1,11 +1,9 @@
-#ifndef __ch57x_CLK_H__
-#define __ch57x_CLK_H__
+#ifndef __ch57x_CLK_HPP__
+#define __ch57x_CLK_HPP__
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include <stdint.h>
 
-typedef enum
+enum SYS_CLKTypeDef : uint8_t
 {
     CLK_SOURCE_LSI = 0xC0,
 
@@ -25,10 +23,9 @@ typedef enum
     CLK_SOURCE_HSE_PLL_25MHz = (0x40 | 24),
     CLK_SOURCE_HSE_PLL_24MHz = (0x40 | 25),
     CLK_SOURCE_HSE_PLL_20MHz = (0x40 | 30),
+};
 
-} SYS_CLKTypeDef;
-
-typedef enum
+enum HSECapTypeDef : uint8_t
 {
     HSECap_6p = 0,
     HSECap_8p,
@@ -37,14 +34,9 @@ typedef enum
     HSECap_14p,
     HSECap_16p,
     HSECap_18p,
-    HSECap_20p
-
-} HSECapTypeDef;
+    HSECap_20p,
+};
 
 void HSECFG_Capacitance(HSECapTypeDef c);
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif

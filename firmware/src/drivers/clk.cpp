@@ -1,4 +1,4 @@
-#include "ch57x_common.h"
+#include "common.hpp"
 
 void HSECFG_Capacitance(HSECapTypeDef c)
 {

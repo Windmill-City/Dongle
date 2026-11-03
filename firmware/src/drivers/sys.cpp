@@ -1,4 +1,4 @@
-#include "ch57x_common.h"
+#include "common.hpp"
 
 __HIGH_CODE
 void SetSysClock(SYS_CLKTypeDef sc)
@@ -73,6 +73,8 @@ uint32_t SYS_GetSysTickCnt(void)
     return SysTick->CNTL;
 }
 
+extern "C"
+{
 __INTERRUPT
 __HIGH_CODE
 __attribute__((weak))
@@ -90,4 +92,5 @@ __attribute__((weak))
 void NMI_Handler(void)
 {
     while(1);
+}
 }
