@@ -123,12 +123,6 @@ CH340/USB-TTL 接线：
 | RXD | D+ | PA1（UART2 TXD） |
 | GND | GND | GND |
 
-- **TXD 接 PA0（D-），RXD 接 PA1（D+）**，不要接反。
-- 先运行烧录命令，再上电，让 ROM 在复位窗口内检测到串口。
-
-```powershell
-.\tools\wchisp\wchisp.exe -s -p COM4 flash .\firmware\build\rf_uart_dongle.hex
-```
 
 ### 其他方式
 
