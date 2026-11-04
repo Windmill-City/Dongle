@@ -111,11 +111,29 @@ build/rf_uart_dongle.map
 
 ## 烧录
 
-使用 `build/rf_uart_dongle.hex`：
+使用 `build/rf_uart_dongle.hex`。
+
+### 串口 ISP
+
+CH340/USB-TTL 接线：
+
+| USB-TTL | Dongle | 芯片引脚 |
+|---------|--------|----------|
+| TXD | D- | PA0（UART2 RXD） |
+| RXD | D+ | PA1（UART2 TXD） |
+| GND | GND | GND |
+
+- **TXD 接 PA0（D-），RXD 接 PA1（D+）**，不要接反。
+- 先运行烧录命令，再上电，让 ROM 在复位窗口内检测到串口。
+
+```powershell
+.\tools\wchisp\wchisp.exe -s -p COM4 flash .\firmware\build\rf_uart_dongle.hex
+```
+
+### 其他方式
 
 1. **USB ISP**：WCHISPTool 选择 CH570，USB 下载；上电瞬间 PA1(D+) 为高。
-2. **串口 ISP**：PA0=TXD、PA1=RXD，USB-TTL 接 D-/D+，先点下载再上电。
-3. **SWD**：PA0=SWDIO、PA1=SWCLK，WCH-LinkE 直接下载调试。
+2. **SWD**：PA0=SWDIO、PA1=SWCLK，WCH-LinkE 直接下载调试。
 
 ## 资源占用（默认配置）
 
@@ -125,4 +143,5 @@ build/rf_uart_dongle.map
 ## 验证状态
 
 - `make`：通过。
+- 串口 ISP 烧录（wchisp，CH570/CH572）：通过。
 - USB 枚举、2.4 GHz 配对和透传：需要实机验证。
