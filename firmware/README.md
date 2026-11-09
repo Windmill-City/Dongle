@@ -24,8 +24,7 @@
 ```text
 firmware/
 ├─ Makefile
-├─ ld/ch572_app.ld     应用链接脚本（0x2000 起始）
-├─ ld/ch572_iap.ld     引导程序链接脚本（0x0 起始）
+├─ ld/ch572.ld         应用/引导程序共用链接脚本（Makefile 传入 Flash 窗口）
 ├─ include/ch572/
 │  ├─ config.hpp
 │  ├─ platform/       寄存器、中断、时钟、GPIO、SysTick、Flash
@@ -40,7 +39,6 @@ firmware/
 │  ├─ usb/
 │  ├─ radio/
 │  └─ main.cpp
-├─ sdk/               WCH 外设库（仅作参考，已不参与构建）
 └─ tools/             应用/IAP 升级工具（upgrade.py、common.py）
 ```
 
@@ -91,7 +89,7 @@ make clean
 工程不依赖任何预编译 RF 静态库。RFIP/RFRole 前端、RFEND 校准/调谐和
 2.4 GHz 收发时序全部位于 `src/radio/`：
 
-- `rfip.cpp`：接入地址、CRC、PHY 模式、收发启动、IRQ 处理。
+- `rfip.cpp`：接入地址、CRC、固定 2 Mbps PHY、收发启动、IRQ 处理。
 - `rfend.cpp`：TX 电容/增益校准、RX 滤波器与 ADC 校准、调谐等待逻辑。
 - `rf_uart.cpp`：配对、轮询、序号、ACK 和双向透传。
 
@@ -166,18 +164,18 @@ python tools/upgrade.py iap build/boot/rf_uart_iap.bin
 - 触发依赖 `pyusb` 能在 CH341 驱动占用设备时发送控制请求（Windows 需 UsbDk 或
   WinUSB/libusbK）。无法触发时用 SWD 或串口 ISP 恢复/烧录。
 - 帧格式：`A5 | CMD | LEN_LO LEN_HI | PAYLOAD | XOR`，每条命令回一个状态字节。
-  `0x01` 擦除（4 字节长度）、`0x02` 写数据（地址 + 数据）、`0x03` 校验、
-  `0x04` 结束（4 字节 CRC32）、`0x05` 中止（仅在擦除前可用）。
+  `0x01` 擦除（4 字节长度）、`0x02` 写数据（地址 + 数据）、
+  `0x04` 结束（4 字节 CRC32）。
 - 升级过程中掉电时需要用 SWD 或串口 ISP 恢复。
 
 ## 资源占用（默认配置，GCC 15 `-Os`）
 
 | 目标 | Flash | RAM |
 |------|-------|-----|
-| 应用 `rf_uart_app` | 12992 B（约 12.7 KiB） | 7652 B（约 7.5 KiB） |
-| 引导程序 `rf_uart_iap` | 7124 B（约 7.0 KiB） | 4540 B（约 4.4 KiB） |
+| 应用 `rf_uart_app` | 11472 B（约 11.2 KiB） | 6484 B（约 6.3 KiB） |
+| 引导程序 `rf_uart_iap` | 6796 B（约 6.6 KiB） | 4408 B（约 4.3 KiB） |
 
-- 应用 Flash 可用 232 KiB，引导程序可用 8 KiB（剩余约 1 KiB），RAM 均为 12 KiB。
+- 应用 Flash 可用 232 KiB，引导程序可用 8 KiB（剩余约 1.4 KiB），RAM 均为 12 KiB。
 
 ## 验证状态
 

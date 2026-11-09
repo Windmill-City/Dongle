@@ -2,7 +2,6 @@
 
 MRS_TOOLCHAIN ?= C:/MounRiver/MounRiver_Studio3/resources/app/resources/win32/components/WCH/Toolchain/RISC-V Embedded GCC15/bin
 PREFIX        := $(MRS_TOOLCHAIN)/riscv32-wch-elf-
-CC            := "$(PREFIX)gcc.exe"
 CXX           := "$(PREFIX)g++.exe"
 OBJCOPY       := "$(PREFIX)objcopy.exe"
 SIZE          := "$(PREFIX)size.exe"
@@ -17,8 +16,6 @@ CXXFLAGS      := $(ARCH) -Os -std=c++17 \
                  -fno-common -fsigned-char -fmessage-length=0 \
                  -Wall -Wextra
 ASFLAGS       := $(ARCH) -x assembler-with-cpp
-CFLAGS        := $(ARCH) -Os -ffunction-sections -fdata-sections -fno-common \
-                 -Wall -Wextra -std=gnu11
 INCLUDES      := -Iinclude
 
 COMMON_CXX    := src/platform/gpio.cpp src/platform/clock.cpp \
@@ -31,23 +28,25 @@ APP_CXX       := src/main.cpp src/platform/systick.cpp \
 IAP_CXX       := src/boot/iap_main.cpp src/boot/iap_update.cpp \
                  src/usb/ch341.cpp src/platform/systick.cpp
 
+LDSCRIPT      := ld/ch572.ld
+LD_DEFS_APP   := -Wl,--defsym=FLASH_ORIGIN=0x00002000 -Wl,--defsym=FLASH_LENGTH=0x0003A000
+LD_DEFS_IAP   := -Wl,--defsym=FLASH_ORIGIN=0x00000000 -Wl,--defsym=FLASH_LENGTH=0x00002000
+LIBS          := -lm
+
 ifdef IAP_BOOT
 CXX_SOURCES   := $(COMMON_CXX) $(IAP_CXX) src/platform/flash.cpp
-LIBS          := -lm
-LDSCRIPT      := ld/ch572_iap.ld
+LD_DEFS       := $(LD_DEFS_IAP)
 else
 CXX_SOURCES   := $(COMMON_CXX) $(APP_CXX)
-LIBS          := -lm
-LDSCRIPT      := ld/ch572_app.ld
+LD_DEFS       := $(LD_DEFS_APP)
 endif
 
 ASM_SOURCES   := src/boot/startup_ch572.S
 OBJECTS       := $(patsubst %.cpp,$(BUILD)/%.o,$(CXX_SOURCES)) \
-                 $(patsubst %.S,$(BUILD)/%.o,$(ASM_SOURCES)) \
-                 $(patsubst %.c,$(BUILD)/%.o,$(C_SOURCES))
+                 $(patsubst %.S,$(BUILD)/%.o,$(ASM_SOURCES))
 DEPS          := $(OBJECTS:.o=.d)
 
-LDFLAGS       := $(ARCH) -T$(LDSCRIPT) -nostartfiles \
+LDFLAGS       := $(ARCH) -T$(LDSCRIPT) $(LD_DEFS) -nostartfiles \
                  -Wl,--gc-sections -Wl,--print-memory-usage \
                  -Wl,-Map=$(BUILD)/$(TARGET).map \
                  --specs=nano.specs --specs=nosys.specs
@@ -72,7 +71,7 @@ iap_app:
 	$(MAKE) BUILD=build/app TARGET=rf_uart_app build
 
 iap_boot:
-	$(MAKE) BUILD=build/boot TARGET=rf_uart_iap IAP_BOOT=1 CXXFLAGS="$(CXXFLAGS) -DIAP_BOOT" build
+	$(MAKE) BUILD=build/boot TARGET=rf_uart_iap IAP_BOOT=1 build
 
 build: $(BUILD)/$(TARGET).hex
 
@@ -92,10 +91,6 @@ $(BUILD)/%.o: %.cpp
 $(BUILD)/%.o: %.S
 	@$(call MKDIR_P,$(dir $@))
 	$(CXX) $(ASFLAGS) $(INCLUDES) -c $< -o $@
-
-$(BUILD)/%.o: %.c
-	@$(call MKDIR_P,$(dir $@))
-	$(CC) $(CFLAGS) $(INCLUDES) -MMD -MP -c $< -o $@
 
 clean:
 	@$(call RM_RF,build)

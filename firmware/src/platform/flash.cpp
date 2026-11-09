@@ -1,7 +1,5 @@
 #include "ch572/platform/flash.hpp"
 
-#include <cstring>
-
 #include "ch572/config.hpp"
 #include "ch572/platform/registers.hpp"
 
@@ -17,9 +15,7 @@ constexpr std::uint32_t kPageMask = 0xFFu;
 constexpr std::uint8_t kCmdWriteEnable = 0x06;
 constexpr std::uint8_t kCmdReadStatus = 0x05;
 constexpr std::uint8_t kCmdProgram = 0x02;
-constexpr std::uint8_t kCmdErase64K = 0xD8;
 constexpr std::uint8_t kCmdErase4K = 0x20;
-constexpr std::uint8_t kCmdErase256 = 0x81;
 
 inline CH572_HIGH_CODE void bus_delay() noexcept
 {
@@ -153,37 +149,19 @@ CH572_HIGH_CODE bool erase_range(std::uint32_t address, std::uint32_t length) no
 {
     begin_control();
 
-    // Work down 64K -> 4K -> 256B -> 16B so large aligned ranges use the
-    // widest erase the controller offers.
-    std::uint32_t size = 0x10000u;
-    do
+    // erase() rounds the range to whole 4 KiB sectors, which is the only
+    // granularity either firmware region uses.
+    while (length >= kFlashSectorSize)
     {
-        if ((address & (size - 1u)) == 0u)
+        rom_address(kCmdErase4K, address);
+        if (!rom_wait())
         {
-            while (length >= size)
-            {
-                std::uint8_t command = kCmdErase256;
-                if (size == 0x10000u)
-                {
-                    command = kCmdErase64K;
-                }
-                else if (size == 0x1000u)
-                {
-                    command = kCmdErase4K;
-                }
-
-                rom_address(command, address);
-                if (!rom_wait())
-                {
-                    end_control();
-                    return false;
-                }
-                address += size;
-                length -= size;
-            }
+            end_control();
+            return false;
         }
-        size >>= 4;
-    } while (size > 0x10u);
+        address += kFlashSectorSize;
+        length -= kFlashSectorSize;
+    }
 
     rom_end();
     end_control();
@@ -235,20 +213,6 @@ CH572_HIGH_CODE bool write(std::uint32_t address, const void *buffer, std::uint3
 
     sysreg::SafeAccess access;
     return program(address, static_cast<const std::uint8_t *>(buffer), words);
-}
-
-bool verify(std::uint32_t address, const void *buffer, std::uint32_t length) noexcept
-{
-    if (length == 0u)
-    {
-        return true;
-    }
-    if (buffer == nullptr || address >= kFlashEnd || length > kFlashEnd - address)
-    {
-        return false;
-    }
-
-    return std::memcmp(reinterpret_cast<const void *>(address), buffer, length) == 0;
 }
 
 } // namespace ch572::flash

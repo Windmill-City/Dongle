@@ -11,8 +11,8 @@ Both targets use the same path:
     4. the host streams A5 | CMD | LEN_LO LEN_HI | PAYLOAD | XOR frames
     5. the device verifies the CRC and resets
 
-Commands: 0x01 erase(length), 0x02 data(addr + data), 0x03 verify(addr + data),
-0x04 end(crc32). Every frame is answered with one status byte; 0 means success.
+Commands: 0x01 erase(length), 0x02 data(addr + data), 0x04 end(crc32).
+Every frame is answered with one status byte; 0 means success.
 """
 
 import argparse

@@ -72,7 +72,9 @@ void Ch341Serial::init()
 void Ch341Serial::vendor_init()
 {
     usbreg::ctrl() = 0;
-    usbreg::ep4_1_mod() = usbreg::kUep1TxEn | usbreg::kUep1RxEn;
+    // EP1 is an IN-only status endpoint; enabling RX here would need a
+    // second 64-byte buffer that nothing uses.
+    usbreg::ep4_1_mod() = usbreg::kUep1TxEn;
     usbreg::ep2_3_mod() = usbreg::kUep2RxEn | usbreg::kUep2TxEn;
 
     usbreg::ep0_dma() = static_cast<std::uint16_t>(reinterpret_cast<std::uintptr_t>(&m_ep0_buffer[0]));
@@ -260,7 +262,6 @@ void Ch341Serial::handle_setup()
         }
 
         case kReqSetAddress:
-            m_device_info.flags |= kAddressFlag;
             m_device_info.address = setup->value_l;
             break;
 
@@ -294,9 +295,6 @@ void Ch341Serial::handle_setup()
                     break;
                 case 0x81:
                     usbreg::ep1_ctrl() = (usbreg::ep1_ctrl() & ~(usbreg::kUepTTog | usbreg::kMaskUepTRes)) | usbreg::kUepTResNak;
-                    break;
-                case 0x01:
-                    usbreg::ep1_ctrl() = (usbreg::ep1_ctrl() & ~(usbreg::kUepRTog | usbreg::kMaskUepRRes)) | usbreg::kUepRResAck;
                     break;
                 default:
                     length = kStall;
@@ -349,7 +347,6 @@ void Ch341Serial::handle_setup()
             {
             case kClassGetLineCoding:
             {
-                m_descriptor = m_ep0_buffer;
                 length = static_cast<std::uint8_t>(sizeof(LineCoding));
                 std::memcpy(m_ep0_buffer, &m_line_coding, sizeof(LineCoding));
                 break;
@@ -415,14 +412,6 @@ void Ch341Serial::irq_handler()
             case kTokenIn | 2:
                 usbreg::ep2_ctrl() ^= usbreg::kUepTTog;
                 usbreg::ep2_ctrl() = (usbreg::ep2_ctrl() & ~usbreg::kMaskUepTRes) | kInNak;
-                break;
-
-            case kTokenOut | 1:
-                if (toggle_ok)
-                {
-                    usbreg::ep1_ctrl() ^= usbreg::kUepRTog;
-                    usbreg::ep1_ctrl() &= 0xF3u;
-                }
                 break;
 
             case kTokenIn | 1:

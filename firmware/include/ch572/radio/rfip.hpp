@@ -1,6 +1,5 @@
 #pragma once
 
-#include <cstddef>
 #include <cstdint>
 
 #include "ch572/config.hpp"
@@ -16,11 +15,6 @@ inline constexpr RoleEvent kEventRx = 1u << 0;
 inline constexpr RoleEvent kEventCrcError = 1u << 1;
 inline constexpr RoleEvent kEventTxFinish = 1u << 2;
 inline constexpr RoleEvent kEventTimeout = 1u << 3;
-
-inline constexpr std::uint32_t kPhyModeMask = 0x30;
-inline constexpr std::uint32_t kPhyMode1M = 0u << 4;
-inline constexpr std::uint32_t kPhyMode2M = 1u << 4;
-inline constexpr std::uint32_t kPhyMode2G4 = 3u << 4;
 
 inline constexpr std::uint8_t kTxPowerMinus25Dbm = 0x01;
 inline constexpr std::uint8_t kTxPowerMinus20Dbm = 0x02;
@@ -43,19 +37,14 @@ struct RoleConfig
     ProcessCallback process_cb;
 };
 
-// Layout matches the vendor rfipTx_t/rfipRx_t structures.  Keep the
-// static_asserts below in sync if this is ever changed.
+// The link always uses the 2 Mbps PHY and a channel index (0..63), so the
+// parameters only carry what the transmit and receive paths actually need.
 struct TxParams
 {
     std::uint32_t access_address;
-    std::uint8_t access_address_ex;
-    std::uint8_t reserved0[3];
     std::uint32_t crc_init;
     std::uint32_t frequency;
-    std::uint32_t properties;
     std::uint32_t tx_dma;
-    std::uint8_t white_channel;
-    std::uint8_t tx_len;
     std::uint8_t wait_time;
     std::int8_t tx_power;
     std::uint32_t crc_poly;
@@ -64,30 +53,13 @@ struct TxParams
 struct RxParams
 {
     std::uint32_t access_address;
-    std::uint8_t access_address_ex;
-    std::uint8_t reserved0[3];
     std::uint32_t crc_init;
     std::uint32_t frequency;
-    std::uint32_t properties;
     std::uint32_t rx_dma;
-    std::uint8_t white_channel;
     std::uint8_t rx_max_len;
     std::uint32_t time_out;
     std::uint32_t crc_poly;
 };
-
-static_assert(sizeof(TxParams) == 32, "TxParams must match the vendor ABI");
-static_assert(sizeof(RxParams) == 36, "RxParams must match the vendor ABI");
-static_assert(offsetof(TxParams, tx_dma) == 20, "vendor ABI");
-static_assert(offsetof(TxParams, white_channel) == 24, "vendor ABI");
-static_assert(offsetof(TxParams, tx_len) == 25, "vendor ABI");
-static_assert(offsetof(TxParams, wait_time) == 26, "vendor ABI");
-static_assert(offsetof(TxParams, tx_power) == 27, "vendor ABI");
-static_assert(offsetof(TxParams, crc_poly) == 28, "vendor ABI");
-static_assert(offsetof(RxParams, rx_dma) == 20, "vendor ABI");
-static_assert(offsetof(RxParams, rx_max_len) == 25, "vendor ABI");
-static_assert(offsetof(RxParams, time_out) == 28, "vendor ABI");
-static_assert(offsetof(RxParams, crc_poly) == 32, "vendor ABI");
 
 void role_init(RoleConfig *config) noexcept;
 CH572_HIGH_CODE void start_tx(TxParams *params) noexcept;

@@ -55,13 +55,11 @@ private:
     static constexpr std::size_t kUsbBufferSize = 256;
     static constexpr std::size_t kCh341RegisterCount = 10;
     static constexpr std::uint8_t kInNak = 2;
-    static constexpr std::uint8_t kAddressFlag = 0x04;
 
     struct DeviceInfo
     {
         std::uint8_t config = 0;
         std::uint8_t address = 0;
-        std::uint8_t flags = 0;
     };
 
     void vendor_init();

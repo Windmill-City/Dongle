@@ -38,62 +38,6 @@ inline std::uint32_t read_u32(const void *address) noexcept
     return *static_cast<const std::uint32_t *>(address);
 }
 
-CH572_HIGH_CODE void set_channel(std::uint32_t frequency, std::uint32_t properties, std::uint8_t mode) noexcept
-{
-    if ((properties & 1u) == 0)
-    {
-        std::uint32_t code;
-        if (frequency <= 0x24AE9Fu)
-        {
-            code = 0x25u;
-        }
-        else if (frequency <= 0x25048Fu)
-        {
-            code = ((frequency + 0xFFDB5930u) / 2000u - 1u) & 0x7Fu;
-        }
-        else if (frequency == 0x250490u)
-        {
-            code = 0x26u;
-        }
-        else if (frequency <= 0x25D77Fu)
-        {
-            code = ((frequency + 0xFFDB5930u) / 2000u - 2u) & 0x7Fu;
-        }
-        else
-        {
-            code = 0x27u;
-        }
-
-        const std::uint32_t value = Bb::r32(bb::Control);
-        Bb::r32(bb::Control) = (value & 0xFFFFFF80u) | code;
-    }
-
-    if (mode == 1)
-    {
-        const std::uint32_t phy = properties & 0x30u;
-        if (phy == 0x30u)
-        {
-            frequency -= (((properties >> 25) & 3u) == 0) ? 2000u : 1000u;
-        }
-        else if (phy == 0x10u)
-        {
-            frequency -= 2000u;
-        }
-        else
-        {
-            frequency -= 1000u;
-        }
-    }
-
-    RfEnd::r32(rfend_reg::TxControl) |= 2u;
-    RfEnd::r32(rfend_reg::ChannelDivider) =
-        (RfEnd::r32(rfend_reg::ChannelDivider) & 0xFE0FFFFFu) |
-        (((frequency / 0xFA00u) & 0x1Fu) << 20);
-    RfEnd::r32(rfend_reg::ChannelDivider) =
-        (RfEnd::r32(rfend_reg::ChannelDivider) & 0xFFFC0000u) |
-        ((((frequency % 0xFA00u) * 0x400u) / 250u) & 0x3FFFu);
-}
-
 CH572_HIGH_CODE void start_lle_timer(std::uint32_t total, std::uint32_t bit) noexcept
 {
     const std::uint32_t saved = Lle::r32(lle::Config2);
@@ -104,171 +48,41 @@ CH572_HIGH_CODE void start_lle_timer(std::uint32_t total, std::uint32_t bit) noe
     Lle::r32(lle::Config2) = saved;
 }
 
-CH572_HIGH_CODE void configure_channel(std::uint32_t frequency, std::uint32_t properties,
-                                       std::uint8_t white_channel, std::uint8_t mode) noexcept
+CH572_HIGH_CODE void configure_channel(std::uint32_t channel) noexcept
 {
-    if (frequency <= 0x231860u)
-    {
-        RfEnd::r32(rfend_reg::TxControl) &= ~2u;
-        Bb::r32(bb::Control) =
-            (Bb::r32(bb::Control) & 0xFFFFFF80u) | (frequency & 0x7Fu);
-        return;
-    }
-
-    set_channel(frequency, properties, mode);
-
-    if ((properties & 4u) != 0)
-    {
-        const std::uint32_t value = Bb::r32(bb::Control);
-        const std::uint32_t white = ((value & 0x40u) | white_channel) & 0x7Fu;
-        Bb::r32(bb::Control) = (value & 0xFFFFFF80u) | white;
-    }
-    if ((properties & 1u) != 0)
-    {
-        const std::uint32_t value = Bb::r32(bb::Control);
-        Bb::r32(bb::Control) = (value & 0xFFFFFF80u) | ((value & 0x3Fu) | 0x40u);
-    }
+    RfEnd::r32(rfend_reg::TxControl) &= ~2u;
+    Bb::r32(bb::Control) =
+        (Bb::r32(bb::Control) & 0xFFFFFF80u) | (channel & 0x7Fu);
 }
 
 CH572_HIGH_CODE void set_phy_tx_mode(const TxParams &params) noexcept
 {
-    const std::uint32_t properties = params.properties;
-    const std::uint32_t phy = properties & 0x30u;
+    RfEnd::r32(rfend_reg::PhyConfig) &= ~0x700u;
 
-    RfEnd::r32(rfend_reg::PhyConfig) =
-        (RfEnd::r32(rfend_reg::PhyConfig) & ~0x700u) | (properties & 0x700u);
-
-    if (phy == 0x10u)
-    {
-        Bb::r32(bb::Control) &= ~0x300u;
-        const std::uint32_t dma_word = read_u32(reinterpret_cast<const void *>(params.tx_dma));
-        Bb::r32(bb::Control3) &= 0xF9FFFFFFu;
-
-        const std::uint32_t wait = Lle::r16(lle::WaitTime);
-
-        const std::uint32_t length = (dma_word >> 8) & 0xFFu;
-        const std::uint32_t total =
-            (((length + 11u) << 2) + ((wait >> 1) + 44u)) << 1;
-        start_lle_timer(total, 0x20000u);
-        return;
-    }
-
-    if (phy == 0x30u)
-    {
-        Bb::r32(bb::Control) |= 0x300u;
-        Bb::r16(bb::Mode2G4) = static_cast<std::uint16_t>((properties >> 16) | 0x2000u);
-
-        const std::uint32_t control3 = Bb::r32(bb::Control3);
-        std::uint8_t length;
-        if ((control3 & 0x01000000u) != 0)
-        {
-            length = *reinterpret_cast<const std::uint8_t *>(params.tx_dma);
-        }
-        else
-        {
-            length = params.tx_len;
-            Bb::r32(bb::Length) |= 0x100u;
-            Bb::r8(bb::Length) = params.tx_len;
-        }
-
-        const std::uint32_t wait = Lle::r16(lle::WaitTime);
-
-        std::uint32_t total;
-        if (((control3 >> 25) & 3u) == 1u)
-        {
-            total = (((static_cast<std::uint32_t>(length) + 10u) << 3) +
-                     ((wait >> 1) + 44u)) << 1;
-        }
-        else
-        {
-            total = (((static_cast<std::uint32_t>(length) + 11u) << 2) +
-                     ((wait >> 1) + 44u)) << 1;
-        }
-        start_lle_timer(total, 0x20000u);
-        return;
-    }
-
-    Bb::r32(bb::Control) = (Bb::r32(bb::Control) & ~0x300u) | 0x100u;
-    const std::uint32_t dma_word = read_u32(reinterpret_cast<const void *>(params.tx_dma));
+    Bb::r32(bb::Control) &= ~0x300u;
+    const std::uint32_t dma_word =
+        read_u32(reinterpret_cast<const void *>(params.tx_dma));
     Bb::r32(bb::Control3) &= 0xF9FFFFFFu;
-    Bb::r32(bb::Control3) |= 0x20000000u;
 
     const std::uint32_t wait = Lle::r16(lle::WaitTime);
-
     const std::uint32_t length = (dma_word >> 8) & 0xFFu;
     const std::uint32_t total =
-        ((((length + 10u) << 3) + ((wait >> 1) + 44u))) << 1;
+        (((length + 11u) << 2) + ((wait >> 1) + 44u)) << 1;
     start_lle_timer(total, 0x20000u);
 }
 
-CH572_HIGH_CODE void set_phy_rx_mode(std::uint32_t properties, std::uint8_t rx_max_len) noexcept
+CH572_HIGH_CODE void set_phy_rx_mode(std::uint8_t rx_max_len) noexcept
 {
-    const std::uint32_t phy = properties & 0x30u;
-
-    if (phy == 0x10u)
-    {
-        Bb::r32(bb::Control) &= ~0x300u;
-        RfEnd::r32(rfend_reg::FilterControl) =
-            (RfEnd::r32(rfend_reg::FilterControl) & ~0x1Fu) |
-            (rfend_block::tune_filter_2m() & 0x1Fu);
-        Bb::r32(bb::Control3) &= 0xF9FFFFFFu;
-        Bb::r32(bb::Control1) = (Bb::r32(bb::Control1) & ~0x3Fu) | 13u;
-        Bb::r8(bb::Control2High) = 127u;
-        Bb::r32(bb::Control2) = (Bb::r32(bb::Control2) & ~0x3FFu) | 160u;
-        g_wait_recv_time = ((static_cast<std::uint32_t>(rx_max_len) + 3u) << 3) + 60u;
-        return;
-    }
-
-    if (phy == 0x30u)
-    {
-        Bb::r32(bb::Control) |= 0x300u;
-        Bb::r16(bb::Mode2G4) =
-            static_cast<std::uint16_t>((properties >> 16) | 0x2000u);
-
-        const std::uint32_t control3 = Bb::r32(bb::Control3);
-        if ((control3 & 0x01000000u) == 0)
-        {
-            Bb::r32(bb::Length) |= 0x100u;
-            Bb::r8(bb::Length) = rx_max_len;
-        }
-
-        if (((control3 >> 25) & 3u) == 1u)
-        {
-            g_wait_recv_time = ((static_cast<std::uint32_t>(rx_max_len) + 3u) << 4) + 60u;
-            Bb::r32(bb::Control1) = (Bb::r32(bb::Control1) & ~0x3Fu) | 11u;
-            Bb::r8(bb::Control2High) = 120u;
-            Bb::r32(bb::Control2) =
-                (Bb::r32(bb::Control2) & ~0x3FFu) |
-                ((((control3 >> 20) & 3u) == 0u) ? 124u : 156u);
-            RfEnd::r32(rfend_reg::FilterControl) =
-                (RfEnd::r32(rfend_reg::FilterControl) & ~0x1Fu) |
-                (rfend_block::tune_filter() & 0x1Fu);
-        }
-        else
-        {
-            g_wait_recv_time = ((static_cast<std::uint32_t>(rx_max_len) + 3u) << 3) + 60u;
-            Bb::r32(bb::Control1) = (Bb::r32(bb::Control1) & ~0x3Fu) | 13u;
-            Bb::r8(bb::Control2High) = 127u;
-            Bb::r32(bb::Control2) =
-                (Bb::r32(bb::Control2) & ~0x3FFu) |
-                ((((control3 >> 20) & 3u) == 0u) ? 128u : 160u);
-            RfEnd::r32(rfend_reg::FilterControl) =
-                (RfEnd::r32(rfend_reg::FilterControl) & ~0x1Fu) |
-                (rfend_block::tune_filter_2m() & 0x1Fu);
-        }
-        return;
-    }
-
-    Bb::r32(bb::Control) = (Bb::r32(bb::Control) & ~0x300u) | 0x100u;
+    Bb::r32(bb::Control) &= ~0x300u;
     RfEnd::r32(rfend_reg::FilterControl) =
         (RfEnd::r32(rfend_reg::FilterControl) & ~0x1Fu) |
-        (rfend_block::tune_filter() & 0x1Fu);
+        (rfend_block::tune_filter_2m() & 0x1Fu);
     Bb::r32(bb::Control3) &= 0xF9FFFFFFu;
-    Bb::r32(bb::Control3) |= 0x20000000u;
-    Bb::r32(bb::Control1) = (Bb::r32(bb::Control1) & ~0x3Fu) | 11u;
-    Bb::r8(bb::Control2High) = 120u;
-    Bb::r32(bb::Control2) = (Bb::r32(bb::Control2) & ~0x3FFu) | 156u;
-    g_wait_recv_time = ((static_cast<std::uint32_t>(rx_max_len) + 3u) << 4) + 60u;
+    Bb::r32(bb::Control1) = (Bb::r32(bb::Control1) & ~0x3Fu) | 13u;
+    Bb::r8(bb::Control2High) = 127u;
+    Bb::r32(bb::Control2) = (Bb::r32(bb::Control2) & ~0x3FFu) | 160u;
+    g_wait_recv_time =
+        ((static_cast<std::uint32_t>(rx_max_len) + 3u) << 3) + 60u;
 }
 
 CH572_HIGH_CODE void notify(RoleEvent event) noexcept
@@ -402,7 +216,7 @@ void start_tx(TxParams *params) noexcept
     RfEnd::r32(rfend_reg::Control2) |= 0x33000000u;
     Lle::r32(lle::PhyControl) = 0x000F02D8u;
 
-    configure_channel(params->frequency, params->properties, params->white_channel, 2);
+    configure_channel(params->frequency);
 
     if (Lle::r16(lle::WaitTime) > 40u)
     {
@@ -415,7 +229,7 @@ void start_tx(TxParams *params) noexcept
     }
 
     Bb::r32(bb::AccessAddress) = params->access_address;
-    Bb::r32(bb::AccessAddressEx) = params->access_address_ex;
+    Bb::r32(bb::AccessAddressEx) = 0u;
     Bb::r32(bb::CrcInit) = params->crc_init;
     Bb::r32(bb::CrcPoly) =
         (Bb::r32(bb::CrcPoly) & 0xFF000000u) | (params->crc_poly & 0x00FFFFFFu);
@@ -445,10 +259,10 @@ void set_rx(RxParams *params) noexcept
     RfEnd::r32(rfend_reg::Control2) |= 0x33000000u;
     Lle::r32(lle::PhyControl) = 0x000F01D8u;
 
-    configure_channel(params->frequency, params->properties, params->white_channel, 1);
+    configure_channel(params->frequency);
 
     Bb::r32(bb::RxAccessAddress) = params->access_address;
-    Bb::r32(bb::RxAccessAddressEx) = params->access_address_ex;
+    Bb::r32(bb::RxAccessAddressEx) = 0u;
     Bb::r32(bb::RxCrcInit) = params->crc_init;
     Bb::r32(bb::RxCrcPoly) =
         (Bb::r32(bb::RxCrcPoly) & 0xFF000000u) | (params->crc_poly & 0x00FFFFFFu);
@@ -457,7 +271,7 @@ void set_rx(RxParams *params) noexcept
     Lle::r32(lle::Timer) = 0;
     Lle::r32(lle::Irq) = 0x200000u;
 
-    set_phy_rx_mode(params->properties, params->rx_max_len);
+    set_phy_rx_mode(params->rx_max_len);
 
     Lle::r32(lle::Control) = 1u;
 

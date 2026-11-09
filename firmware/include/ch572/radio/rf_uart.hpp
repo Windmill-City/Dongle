@@ -18,13 +18,12 @@ inline constexpr std::size_t kRxBufferSize = (kMaxRxPacket + 3u) & ~std::size_t{
 
 inline constexpr std::uint16_t kConnectionInterval = 10;
 inline constexpr std::uint16_t kConnectionTimeout = 100;
-inline constexpr std::uint8_t kConnectionPhy = static_cast<std::uint8_t>(rf::kPhyMode2M >> 4);
+inline constexpr std::uint8_t kConnectionPhy = 1; // 2 Mbps
 inline constexpr std::uint16_t kBindEstablishCount = 6;
 inline constexpr std::uint16_t kRfOnUs = 20;
 
 inline constexpr std::uint32_t kDefaultFrequency = 17;
 inline constexpr std::uint32_t kDefaultAccessAddress = 0x57250425u;
-inline constexpr std::uint8_t kDefaultAccessAddressEx = 0;
 inline constexpr std::uint32_t kDefaultCrcInit = 0x555555u;
 inline constexpr std::uint32_t kDefaultCrcPoly = 0x80032Du;
 
@@ -70,14 +69,7 @@ struct CH572_PACKED Response
     std::uint8_t opcode;
     union
     {
-        struct
-        {
-            std::uint32_t baud_rate;
-            std::uint8_t stop_bits;
-            std::uint8_t parity;
-            std::uint8_t data_bits;
-            std::uint8_t io_status;
-        } uart;
+        usb::LineCoding uart;
         std::uint8_t payload[kMaxPayload];
     };
 };
@@ -138,8 +130,7 @@ private:
 
     CH572_HIGH_CODE void start_tx() noexcept;
     CH572_HIGH_CODE void start_rx() noexcept;
-    void configure_link(std::uint32_t access_address, std::uint32_t frequency,
-                        std::uint8_t phy) noexcept;
+    void configure_link(std::uint32_t access_address, std::uint32_t frequency) noexcept;
 
     usb::Ch341Serial &m_usb;
     RingBuffer<kRfBufferSize> m_rf_buffer;

@@ -1,15 +1,17 @@
 /*
- * CH570/CH572 memory layout for the USB-IAP application.
+ * CH570/CH572 memory layout shared by the application and the IAP bootloader.
  *
- * IAP bootloader: 0x00000000-0x00001FFF (8 KiB)
- * Application:    0x00002000-0x0003BFFF
+ * The Makefile selects the flash window with --defsym:
+ *   application: FLASH_ORIGIN=0x00002000, FLASH_LENGTH=0x0003A000
+ *   bootloader:  FLASH_ORIGIN=0x00000000, FLASH_LENGTH=0x00002000
  */
 
 ENTRY(_start)
 
 MEMORY
 {
-    FLASH (rx)  : ORIGIN = 0x00002000, LENGTH = 0x3A000
+    FLASH (rx)  : ORIGIN = DEFINED(FLASH_ORIGIN) ? FLASH_ORIGIN : 0x00000000,
+                  LENGTH = DEFINED(FLASH_LENGTH) ? FLASH_LENGTH : 8K
     RAM   (xrw) : ORIGIN = 0x20000000, LENGTH = 12K
 }
 

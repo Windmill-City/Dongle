@@ -25,9 +25,7 @@ constexpr std::uint8_t kReady = 0x5Au;
 
 constexpr std::uint8_t kCmdErase = 0x01u;
 constexpr std::uint8_t kCmdData = 0x02u;
-constexpr std::uint8_t kCmdVerify = 0x03u;
 constexpr std::uint8_t kCmdEnd = 0x04u;
-constexpr std::uint8_t kCmdAbort = 0x05u;
 
 constexpr std::uint8_t kStatusOk = 0x00u;
 constexpr std::uint8_t kStatusFlash = 0x01u;
@@ -165,30 +163,6 @@ void handle_command(usb::Ch341Serial &usb, ResponseSource &out, std::uint8_t com
         return;
     }
 
-    case kCmdVerify:
-    {
-        if (length < 4u)
-        {
-            out.push(kStatusFrame);
-            return;
-        }
-        const std::uint32_t address = read_le32(payload);
-        const std::uint32_t data_length = static_cast<std::uint32_t>(length) - 4u;
-        if (!session.erased)
-        {
-            out.push(kStatusNotErased);
-            return;
-        }
-        if ((address & 0x3u) != 0u || !in_data_range(session, address, data_length))
-        {
-            out.push(kStatusRange);
-            return;
-        }
-        out.push(flash::verify(address, payload + 4, data_length) ? kStatusOk
-                                                                 : kStatusFlash);
-        return;
-    }
-
     case kCmdEnd:
     {
         if (length != 4u)
@@ -212,16 +186,6 @@ void handle_command(usb::Ch341Serial &usb, ResponseSource &out, std::uint8_t com
         out.push(kStatusOk);
         finish(usb);
     }
-
-    case kCmdAbort:
-        // Only safe while the target region is still intact.
-        if (!session.erased)
-        {
-            out.push(kStatusOk);
-            finish(usb);
-        }
-        out.push(kStatusNotErased);
-        return;
 
     default:
         out.push(kStatusFrame);

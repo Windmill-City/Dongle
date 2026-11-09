@@ -20,21 +20,6 @@ CH572_HIGH_CODE std::uint32_t random_access_address(std::uint16_t value) noexcep
     return (static_cast<std::uint32_t>(value) << 8) | 0x6E0000B6u;
 }
 
-void set_phy(std::uint32_t &properties, std::uint8_t phy) noexcept
-{
-    properties = (properties & ~rf::kPhyModeMask) |
-                 (static_cast<std::uint32_t>(phy & 0x3u) << 4);
-}
-
-void fill_line_coding(Response &response, const usb::LineCoding &coding) noexcept
-{
-    response.uart.baud_rate = coding.baud_rate;
-    response.uart.stop_bits = coding.stop_bits;
-    response.uart.parity = coding.parity;
-    response.uart.data_bits = coding.data_bits;
-    response.uart.io_status = coding.io_status;
-}
-
 } // namespace
 
 void RfUart::init() noexcept
@@ -47,23 +32,18 @@ void RfUart::init() noexcept
     m_interval_timer = static_cast<std::uint32_t>(kConnectionInterval) * 1000u;
     m_radio = RadioState::suspended;
 
-    m_tx_params.access_address_ex = kDefaultAccessAddressEx;
     m_tx_params.crc_init = kDefaultCrcInit;
     m_tx_params.tx_power = static_cast<std::int8_t>(rf::kTxPower0Dbm);
     m_tx_params.crc_poly = kDefaultCrcPoly;
-    m_tx_params.tx_len = 0;
-    m_tx_params.white_channel = 0;
     m_tx_params.wait_time = 0;
 
-    m_rx_params.access_address_ex = kDefaultAccessAddressEx;
     m_rx_params.crc_init = kDefaultCrcInit;
     m_rx_params.crc_poly = kDefaultCrcPoly;
     m_rx_params.rx_dma = reinterpret_cast<std::uint32_t>(&m_rx_buffer[0]);
     m_rx_params.rx_max_len = static_cast<std::uint8_t>(kMaxRxPacket);
-    m_rx_params.white_channel = 0;
     m_rx_params.time_out = 0;
 
-    configure_link(kDefaultAccessAddress, kDefaultFrequency, kConnectionPhy);
+    configure_link(kDefaultAccessAddress, kDefaultFrequency);
 
     m_role_config.process_cb = &RfUart::on_status;
     rf::role_init(&m_role_config);
@@ -111,16 +91,14 @@ void RfUart::start_rx() noexcept
     rf::set_rx(&m_rx_params);
 }
 
-void RfUart::configure_link(std::uint32_t access_address, std::uint32_t frequency,
-                            std::uint8_t phy) noexcept
+void RfUart::configure_link(std::uint32_t access_address,
+                            std::uint32_t frequency) noexcept
 {
     m_tx_params.access_address = access_address;
     m_tx_params.frequency = frequency;
-    set_phy(m_tx_params.properties, phy);
 
     m_rx_params.access_address = access_address;
     m_rx_params.frequency = frequency;
-    set_phy(m_rx_params.properties, phy);
 }
 
 void RfUart::count_timeout() noexcept
@@ -141,7 +119,7 @@ void RfUart::disconnect() noexcept
     m_link = LinkState::unbound;
     m_data_pending = false;
     m_timeout = 0;
-    configure_link(kDefaultAccessAddress, kDefaultFrequency, kConnectionPhy);
+    configure_link(kDefaultAccessAddress, kDefaultFrequency);
     m_radio = RadioState::receiving;
     start_rx();
 }
@@ -150,7 +128,7 @@ void RfUart::apply_binding(const BoundResponse &response) noexcept
 {
     m_timeout = 0;
     m_link = LinkState::awaiting;
-    configure_link(response.access_address, response.channel, response.phy);
+    configure_link(response.access_address, response.channel);
 }
 
 void RfUart::process_rx(Packet *packet) noexcept
@@ -225,7 +203,7 @@ void RfUart::process_rx(Packet *packet) noexcept
                 packet_out.length = static_cast<std::uint8_t>(
                     1 + sizeof(usb::LineCoding));
                 response.opcode = kOpcodeBsp;
-                fill_line_coding(response, m_usb.line_coding());
+                response.uart = m_usb.line_coding();
                 packet_out.sequence = m_data_sequence;
             }
             else
@@ -243,7 +221,7 @@ void RfUart::process_rx(Packet *packet) noexcept
                     packet_out.length = static_cast<std::uint8_t>(
                         1 + sizeof(usb::LineCoding));
                     response.opcode = kOpcodeBsp;
-                    fill_line_coding(response, m_usb.line_coding());
+                    response.uart = m_usb.line_coding();
                     packet_out.sequence = m_data_sequence;
                 }
                 else

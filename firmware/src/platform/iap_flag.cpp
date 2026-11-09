@@ -65,11 +65,7 @@ void request() noexcept
 void jump() noexcept
 {
     request();
-    sysreg::SafeAccess access;
-    sysreg::reset_watchdog_ctrl() |= sysreg::kSoftwareReset;
-    for (;;)
-    {
-    }
+    sysreg::software_reset();
 }
 
 } // namespace ch572::iap
