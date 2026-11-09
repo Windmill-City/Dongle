@@ -1,9 +1,6 @@
 #include "ch572/radio/rfend.hpp"
 
 #include "ch572/platform/registers.hpp"
-#if defined(UART_DEBUG)
-#include "ch572/hal/uart.hpp"
-#endif
 
 
 namespace ch572::rfend {
@@ -29,8 +26,6 @@ std::uint16_t g_ftune_flag = 0;
 std::uint8_t g_tune_filter = 0;
 std::uint8_t g_tune_filter_2m = 0;
 std::uint32_t g_wait_recv_time = 0;
-bool g_rx_filter_timeout = false;
-std::uint32_t g_timer_probe = 1;
 
 constexpr std::uint32_t kCalibrationTimeout = 10000000u;
 
@@ -76,9 +71,6 @@ std::uint32_t tx_ctune_callx(std::int32_t index) noexcept
 
 void dev_init() noexcept
 {
-#if defined(UART_DEBUG)
-    hal::uart::puts("dev_init\r\n");
-#endif
     RfEnd::r32(off::TxBias) = 1152;
     RfEnd::r32(off::Power) = (RfEnd::r32(off::Power) & 0xFFFF0FFFu) | 0x00008000u;
     RfEnd::r32(off::TxControl) =
@@ -141,17 +133,6 @@ void rx_filter() noexcept
         }
         nop();
     }
-    const std::uint32_t probe = Lle::r32(lle::Timer);
-    g_timer_probe = (probe == 100u) ? 1u : ((probe == 0u) ? 3u : 2u);
-#if defined(UART_DEBUG)
-    hal::uart::puts("rx_filter probe=");
-    hal::uart::put_u32(g_timer_probe);
-    hal::uart::puts(" timer=");
-    hal::uart::put_u32(probe);
-    hal::uart::puts("\r\n");
-#endif
-
-    g_rx_filter_timeout = true;
     for (std::uint32_t i = 0; i < kCalibrationTimeout; ++i)
     {
         if ((i & 0x3FFFu) == 0u)
@@ -160,17 +141,9 @@ void rx_filter() noexcept
         }
         if ((RfEnd::r32(off::FilterResult) & 0x100u) != 0)
         {
-            g_rx_filter_timeout = false;
             break;
         }
     }
-#if defined(UART_DEBUG)
-    hal::uart::puts("rx_filter filter=");
-    hal::uart::put_hex32(RfEnd::r32(off::FilterResult));
-    hal::uart::puts(" timeout=");
-    hal::uart::put_u32(g_rx_filter_timeout ? 1u : 0u);
-    hal::uart::puts("\r\n");
-#endif
 
     nop();
     nop();
@@ -190,16 +163,6 @@ void rx_filter() noexcept
     }
 }
 
-bool rx_filter_timed_out() noexcept
-{
-    return g_rx_filter_timeout;
-}
-
-std::uint32_t timer_probe() noexcept
-{
-    return g_timer_probe;
-}
-
 void rx_adc() noexcept
 {
     RfEnd::r32(off::AdcControl) &= 0xFFFEFFFFu;
@@ -212,11 +175,6 @@ void rx_adc() noexcept
 
 void wait_tune(std::uint16_t cycles) noexcept
 {
-#if defined(UART_DEBUG)
-    hal::uart::puts("wait_tune ");
-    hal::uart::put_u32(cycles);
-    hal::uart::puts("\r\n");
-#endif
     RfEnd::r32(off::Control) &= ~1u;
     RfEnd::r32(off::DacRef) =
         (RfEnd::r32(off::DacRef) & 0xFFFE00FFu) |
@@ -240,14 +198,6 @@ void wait_tune(std::uint16_t cycles) noexcept
             break;
         }
     }
-
-#if defined(UART_DEBUG)
-    hal::uart::puts("  timer=");
-    hal::uart::put_u32(Lle::r32(lle::Timer));
-    hal::uart::puts(" result=");
-    hal::uart::put_hex32(RfEnd::r32(off::TuneResult));
-    hal::uart::puts("\r\n");
-#endif
 }
 
 void tx_ftune() noexcept

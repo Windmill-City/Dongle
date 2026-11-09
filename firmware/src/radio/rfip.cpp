@@ -3,10 +3,6 @@
 #include "ch572/config.hpp"
 #include "ch572/platform/registers.hpp"
 #include "ch572/radio/rfend.hpp"
-#if defined(UART_DEBUG)
-#include "ch572/hal/uart.hpp"
-#endif
-
 
 namespace ch572::rf {
 
@@ -309,29 +305,17 @@ Status role_init(RoleConfig *config) noexcept
     g_lle_process = &rf_basic_process;
     sysreg::iwdg_feed();
 
-#if defined(UART_DEBUG)
-    hal::uart::puts("role_init\r\n");
-#endif
     rfend_block::dev_init();
     sysreg::iwdg_feed();
 
-#if defined(UART_DEBUG)
-    hal::uart::puts("wakeup_reg_init\r\n");
-#endif
     wakeup_reg_init();
     sysreg::iwdg_feed();
 
-#if defined(UART_DEBUG)
-    hal::uart::puts("calibration\r\n");
-#endif
     calibration();
     sysreg::iwdg_feed();
 
     enable_irq(Irq::BleBb);
     enable_irq(Irq::BleLle);
-#if defined(UART_DEBUG)
-    hal::uart::puts("role_init done\r\n");
-#endif
     return 0;
 }
 
