@@ -342,9 +342,6 @@ inline volatile std::uint32_t &set_reg() noexcept
     return *reinterpret_cast<volatile std::uint32_t *>(0x400010B8u);
 }
 
-inline constexpr std::uint32_t kPin0 = 1u << 0;
-inline constexpr std::uint32_t kPin7 = 1u << 7;
-
 } // namespace gpio
 
 // ---------------------------------------------------------------------------
@@ -483,7 +480,6 @@ inline constexpr std::size_t RxCrcInit = 0x58;
 inline constexpr std::size_t RxCrcPoly = 0x5C;
 inline constexpr std::size_t RxAccessAddress = 0x60;
 inline constexpr std::size_t RxAccessAddressEx = 0x64;
-inline constexpr std::size_t RxFilterTune = 0x9C;
 } // namespace bb
 
 namespace rfend {

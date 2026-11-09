@@ -7,26 +7,18 @@
 namespace ch572::rfend {
 namespace {
 
-using radio_reg::Bb;
 using radio_reg::Lle;
 using radio_reg::RfEnd;
 namespace off = radio_reg::rfend;
 namespace lle = radio_reg::lle;
-namespace bb = radio_reg::bb;
 
-// Measured calibration values, filled by tx_ctune() and restorable with
-// tx_ctune_set().
+// Measured calibration values, filled by tx_ctune().
 std::uint8_t g_nco2401 = 0;
 std::uint8_t g_nga2401 = 0;
 std::uint8_t g_nco2440 = 0;
 std::uint8_t g_nga2440 = 0;
 std::uint8_t g_nco2480 = 0;
 std::uint8_t g_nga2480 = 0;
-std::uint16_t g_ftune_flag = 0;
-
-std::uint8_t g_tune_filter = 0;
-std::uint8_t g_tune_filter_2m = 0;
-std::uint32_t g_wait_recv_time = 0;
 
 constexpr std::uint32_t kCalibrationTimeout = 10000000u;
 
@@ -95,23 +87,6 @@ void dev_init() noexcept
     }
 }
 
-void set_dacref_tune(std::uint8_t value) noexcept
-{
-    RfEnd::r32(off::DacRef) =
-        (RfEnd::r32(off::DacRef) & 0xFF07FFFFu) |
-        (static_cast<std::uint32_t>(value & 0x1Fu) << 19);
-}
-
-std::uint8_t get_dacref_tune() noexcept
-{
-    return static_cast<std::uint8_t>((RfEnd::r32(off::DacRef) >> 19) & 0x1Fu);
-}
-
-void set_ex_power() noexcept
-{
-    Bb::r32(bb::RxConfig) |= 0xF0Fu;
-}
-
 void rx_filter() noexcept
 {
     RfEnd::r32(off::FilterControl) &= 0xFFFEFFFFu;
@@ -152,7 +127,7 @@ void rx_filter() noexcept
     nop();
 
     const std::uint8_t tune = static_cast<std::uint8_t>(RfEnd::r32(off::FilterResult) & 0x1Fu);
-    g_tune_filter = tune;
+    detail::g_tune_filter = tune;
     RfEnd::r32(off::FilterControl) |= 0x00010000u;
     RfEnd::r32(off::FilterControl) =
         (RfEnd::r32(off::FilterControl) & ~0x1Fu) | tune;
@@ -160,7 +135,7 @@ void rx_filter() noexcept
 
     if (tune > 3)
     {
-        g_tune_filter_2m = static_cast<std::uint8_t>(tune - 3);
+        detail::g_tune_filter_2m = static_cast<std::uint8_t>(tune - 3);
     }
 }
 
@@ -206,39 +181,6 @@ void tx_ftune() noexcept
     RfEnd::r32(off::Control) |= 0x100u;
 }
 
-void tx_ctune_set(const std::uint8_t *values) noexcept
-{
-    if (values == nullptr || values[0] != 6)
-    {
-        return;
-    }
-
-    g_nco2401 = values[1];
-    g_nga2401 = values[2];
-    g_nco2440 = values[3];
-    g_nga2440 = values[4];
-    g_nco2480 = values[5];
-    g_nga2480 = values[6];
-
-    g_ftune_flag = (g_nco2401 != 0 && g_nga2401 != 0) ? 0x1234u : 0u;
-}
-
-void tx_ctune_get(std::uint8_t *values) noexcept
-{
-    if (values == nullptr)
-    {
-        return;
-    }
-
-    values[0] = 6;
-    values[1] = g_nco2401;
-    values[2] = g_nga2401;
-    values[3] = g_nco2440;
-    values[4] = g_nga2440;
-    values[5] = g_nco2480;
-    values[6] = g_nga2480;
-}
-
 void tx_ctune() noexcept
 {
     RfEnd::r32(off::Control) &= ~0x100u;
@@ -247,24 +189,17 @@ void tx_ctune() noexcept
     RfEnd::r32(off::Control2) |= 0x00020000u;
     RfEnd::r32(off::Control) |= 0x10u;
 
-    if (g_ftune_flag != 0x1234u)
-    {
-        wait_tune(191);
-        g_nco2401 = static_cast<std::uint8_t>(RfEnd::r32(off::TuneResult) & 0x3Fu);
-        g_nga2401 = static_cast<std::uint8_t>((RfEnd::r32(off::GainResult) >> 10) & 0x7Fu);
+    wait_tune(191);
+    g_nco2401 = static_cast<std::uint8_t>(RfEnd::r32(off::TuneResult) & 0x3Fu);
+    g_nga2401 = static_cast<std::uint8_t>((RfEnd::r32(off::GainResult) >> 10) & 0x7Fu);
 
-        wait_tune(231);
-        g_nco2480 = static_cast<std::uint8_t>(RfEnd::r32(off::TuneResult) & 0x3Fu);
-        g_nga2480 = static_cast<std::uint8_t>((RfEnd::r32(off::GainResult) >> 10) & 0x7Fu);
+    wait_tune(231);
+    g_nco2480 = static_cast<std::uint8_t>(RfEnd::r32(off::TuneResult) & 0x3Fu);
+    g_nga2480 = static_cast<std::uint8_t>((RfEnd::r32(off::GainResult) >> 10) & 0x7Fu);
 
-        wait_tune(211);
-        g_nco2440 = static_cast<std::uint8_t>(RfEnd::r32(off::TuneResult) & 0x3Fu);
-        g_nga2440 = static_cast<std::uint8_t>((RfEnd::r32(off::GainResult) >> 10) & 0x7Fu);
-    }
-    else
-    {
-        g_ftune_flag = 0;
-    }
+    wait_tune(211);
+    g_nco2440 = static_cast<std::uint8_t>(RfEnd::r32(off::TuneResult) & 0x3Fu);
+    g_nga2440 = static_cast<std::uint8_t>((RfEnd::r32(off::GainResult) >> 10) & 0x7Fu);
 
     RfEnd::r32(off::TxTable0 + 0) = tx_ctune_call(0);
     RfEnd::r32(off::TxTable0 + 4) = tx_ctune_call(8);
@@ -348,26 +283,6 @@ void calibration() noexcept
     tx_ftune();
     rx_filter();
     rx_adc();
-}
-
-CH572_HIGH_CODE std::uint8_t tune_filter() noexcept
-{
-    return g_tune_filter;
-}
-
-CH572_HIGH_CODE std::uint8_t tune_filter_2m() noexcept
-{
-    return g_tune_filter_2m;
-}
-
-CH572_HIGH_CODE std::uint32_t wait_recv_time() noexcept
-{
-    return g_wait_recv_time;
-}
-
-CH572_HIGH_CODE void set_wait_recv_time(std::uint32_t value) noexcept
-{
-    g_wait_recv_time = value;
 }
 
 } // namespace ch572::rfend

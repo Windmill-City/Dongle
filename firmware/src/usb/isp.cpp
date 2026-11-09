@@ -171,53 +171,44 @@ void IspDevice::handle_setup() noexcept
         {
         case kReqGetDescriptor:
         {
-            std::uint16_t descriptor_length = 0;
+            const std::uint8_t *descriptor = nullptr;
             switch (setup->value_h)
             {
             case kDescriptorDevice:
-                m_descriptor = kDeviceDescriptor;
-                descriptor_length = sizeof(kDeviceDescriptor);
+                descriptor = kDeviceDescriptor;
                 break;
             case kDescriptorConfiguration:
-                m_descriptor = kConfigDescriptor;
-                descriptor_length = sizeof(kConfigDescriptor);
+                descriptor = kConfigDescriptor;
                 break;
             case kDescriptorString:
                 switch (setup->value_l)
                 {
-                case 0:
-                    m_descriptor = kLangDescriptor;
-                    descriptor_length = sizeof(kLangDescriptor);
-                    break;
-                case 1:
-                    m_descriptor = kManufacturerDescriptor;
-                    descriptor_length = sizeof(kManufacturerDescriptor);
-                    break;
-                case 2:
-                    m_descriptor = kProductDescriptor;
-                    descriptor_length = sizeof(kProductDescriptor);
-                    break;
-                default:
-                    error = true;
-                    break;
+                case 0: descriptor = kLangDescriptor; break;
+                case 1: descriptor = kManufacturerDescriptor; break;
+                case 2: descriptor = kProductDescriptor; break;
+                default: break;
                 }
                 break;
             default:
+                break;
+            }
+
+            if (descriptor == nullptr)
+            {
                 error = true;
                 break;
             }
 
-            if (!error)
+            // bLength is the first byte of every USB descriptor.
+            m_descriptor = descriptor;
+            if (m_setup_length > descriptor[0])
             {
-                if (m_setup_length > descriptor_length)
-                {
-                    m_setup_length = descriptor_length;
-                }
-                data_length = (m_setup_length >= kEp0Size) ? kEp0Size : static_cast<std::uint8_t>(m_setup_length);
-                std::memcpy(m_ep0_buffer, m_descriptor, data_length);
-                m_descriptor += data_length;
-                m_setup_length = static_cast<std::uint16_t>(m_setup_length - data_length);
+                m_setup_length = descriptor[0];
             }
+            data_length = (m_setup_length >= kEp0Size) ? kEp0Size : static_cast<std::uint8_t>(m_setup_length);
+            std::memcpy(m_ep0_buffer, m_descriptor, data_length);
+            m_descriptor += data_length;
+            m_setup_length = static_cast<std::uint16_t>(m_setup_length - data_length);
             break;
         }
 

@@ -127,11 +127,7 @@ public:
     std::size_t read(std::uint8_t *dst, std::size_t max_length) noexcept override;
 
 private:
-    CH572_HIGH_CODE static void on_status(rf::RoleState state, std::uint8_t id) noexcept;
-    CH572_HIGH_CODE static void on_rx(Packet *packet) noexcept;
-    CH572_HIGH_CODE static void on_tx() noexcept;
-    CH572_HIGH_CODE static void on_crc_error() noexcept;
-    CH572_HIGH_CODE static void on_timeout() noexcept;
+    CH572_HIGH_CODE static void on_status(rf::RoleState state) noexcept;
 
     CH572_HIGH_CODE void process_rx(Packet *packet) noexcept;
     CH572_HIGH_CODE void process_tx() noexcept;

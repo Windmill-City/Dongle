@@ -19,19 +19,52 @@ static_assert(sizeof(LineCoding) == 8, "CH341 line coding is eight bytes");
 inline constexpr std::uint16_t kVendorId = 0x1A86;
 inline constexpr std::uint16_t kProductId = 0x7523;
 
-extern const std::uint8_t kDeviceDescriptor[];
-extern const std::size_t kDeviceDescriptorSize;
-extern const std::uint8_t kConfigDescriptor[];
-extern const std::size_t kConfigDescriptorSize;
-extern const std::uint8_t kQualifierDescriptor[];
-extern const std::size_t kQualifierDescriptorSize;
-extern const std::uint8_t kLanguageDescriptor[];
-extern const std::size_t kLanguageDescriptorSize;
-extern const std::uint8_t kManufacturerDescriptor[];
-extern const std::size_t kManufacturerDescriptorSize;
-extern const std::uint8_t kProductDescriptor[];
-extern const std::size_t kProductDescriptorSize;
-extern const std::uint8_t kSerialDescriptor[];
-extern const std::size_t kSerialDescriptorSize;
+// Device descriptor: USB 1.10, vendor-specific class, 64-byte control endpoint,
+// VID:PID 1A86:7523, three strings.
+inline constexpr std::uint8_t kDeviceDescriptor[] = {
+    0x12, 0x01,
+    0x10, 0x01,
+    0xFF, 0x00, 0x02, 0x40,
+    0x86, 0x1A, 0x23, 0x75,
+    0x00, 0x31,
+    0x01, 0x02, 0x03,
+    0x01,
+};
+
+// One interface, three endpoints: bulk IN 0x82, bulk OUT 0x02, interrupt IN 0x81.
+inline constexpr std::uint8_t kConfigDescriptor[] = {
+    0x09, 0x02, 0x27, 0x00, 0x01, 0x01, 0x00, 0x80, 0x30,
+    0x09, 0x04, 0x00, 0x00, 0x03, 0xFF, 0x01, 0x02, 0x00,
+    0x07, 0x05, 0x82, 0x02, 0x20, 0x00, 0x00,
+    0x07, 0x05, 0x02, 0x02, 0x20, 0x00, 0x00,
+    0x07, 0x05, 0x81, 0x03, 0x08, 0x00, 0x01,
+};
+
+inline constexpr std::uint8_t kQualifierDescriptor[] = {
+    0x0A, 0x06, 0x00, 0x02, 0xFF, 0x00, 0xFF, 0x40, 0x01, 0x00,
+};
+
+inline constexpr std::uint8_t kLanguageDescriptor[] = {
+    0x04, 0x03, 0x09, 0x04,
+};
+
+inline constexpr std::uint8_t kManufacturerDescriptor[] = {
+    0x0E, 0x03,
+    'w', 0x00, 'c', 0x00, 'h', 0x00, '.', 0x00, 'c', 0x00, 'n', 0x00,
+};
+
+inline constexpr std::uint8_t kProductDescriptor[] = {
+    0x2C, 0x03,
+    'U', 0x00, 'S', 0x00, 'B', 0x00, '2', 0x00, '.', 0x00, '0', 0x00,
+    ' ', 0x00, 'T', 0x00, 'o', 0x00, ' ', 0x00, 'S', 0x00, 'e', 0x00,
+    'r', 0x00, 'i', 0x00, 'a', 0x00, 'l', 0x00, ' ', 0x00, 'P', 0x00,
+    'o', 0x00, 'r', 0x00, 't', 0x00,
+};
+
+inline constexpr std::uint8_t kSerialDescriptor[] = {
+    0x1A, 0x03,
+    'W', 0x00, 'C', 0x00, 'H', 0x00, '4', 0x00, '5', 0x00, '4', 0x00,
+    '5', 0x00, '4', 0x00, '5', 0x00, 'T', 0x00, 'S', 0x00, '2', 0x00,
+};
 
 } // namespace ch572::usb

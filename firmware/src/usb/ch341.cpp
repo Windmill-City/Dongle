@@ -64,11 +64,6 @@ constexpr std::uint8_t kToggleOk = 0x40;
 
 } // namespace
 
-std::uint8_t Ch341Serial::usbreg_dev_addr() noexcept
-{
-    return usbreg::dev_addr();
-}
-
 Ch341Serial &Ch341Serial::instance()
 {
     static Ch341Serial serial;
@@ -145,7 +140,6 @@ void Ch341Serial::device_parameters_init()
 void Ch341Serial::handle_setup(std::uint8_t length)
 {
     auto *setup = reinterpret_cast<SetupRequest *>(m_ep0_buffer);
-    std::uint8_t response[8];
     std::uint8_t data_direction = kRequestTypeIn;
 
     if (length != sizeof(SetupRequest))
@@ -202,10 +196,9 @@ void Ch341Serial::handle_setup(std::uint8_t length)
             ch341_register_read(setup->value_l, &value1);
             ch341_register_read(setup->value_h, &value2);
             length = 2;
-            response[0] = value1;
-            response[1] = value2;
+            m_ep0_buffer[0] = value1;
+            m_ep0_buffer[1] = value2;
             m_setup_length = length;
-            std::memcpy(m_ep0_buffer, response, length);
             break;
         }
 
@@ -242,10 +235,9 @@ void Ch341Serial::handle_setup(std::uint8_t length)
         case kRequestGetVersion:
         {
             length = 2;
-            response[0] = 0x30;
-            response[1] = 0x00;
+            m_ep0_buffer[0] = 0x30;
+            m_ep0_buffer[1] = 0x00;
             m_setup_length = length;
-            std::memcpy(m_ep0_buffer, response, length);
             break;
         }
 
@@ -259,60 +251,49 @@ void Ch341Serial::handle_setup(std::uint8_t length)
         {
         case kStandardGetDescriptor:
         {
+            const std::uint8_t *descriptor = nullptr;
             switch (setup->value_h)
             {
             case kDescriptorDevice:
-                m_descriptor = kDeviceDescriptor;
-                length = static_cast<std::uint8_t>(kDeviceDescriptorSize);
+                descriptor = kDeviceDescriptor;
                 break;
             case kDescriptorConfig:
-                m_descriptor = kConfigDescriptor;
-                length = static_cast<std::uint8_t>(kConfigDescriptorSize);
+                descriptor = kConfigDescriptor;
+                break;
+            case kDescriptorQualifier:
+                descriptor = kQualifierDescriptor;
                 break;
             case kDescriptorString:
                 switch (setup->value_l)
                 {
-                case 0:
-                    m_descriptor = kLanguageDescriptor;
-                    length = static_cast<std::uint8_t>(kLanguageDescriptorSize);
-                    break;
-                case 1:
-                    m_descriptor = kManufacturerDescriptor;
-                    length = static_cast<std::uint8_t>(kManufacturerDescriptorSize);
-                    break;
-                case 2:
-                    m_descriptor = kProductDescriptor;
-                    length = static_cast<std::uint8_t>(kProductDescriptorSize);
-                    break;
-                case 3:
-                    m_descriptor = kSerialDescriptor;
-                    length = static_cast<std::uint8_t>(kSerialDescriptorSize);
-                    break;
-                default:
-                    length = kStall;
-                    break;
+                case 0: descriptor = kLanguageDescriptor; break;
+                case 1: descriptor = kManufacturerDescriptor; break;
+                case 2: descriptor = kProductDescriptor; break;
+                case 3: descriptor = kSerialDescriptor; break;
+                default: break;
                 }
                 break;
-            case kDescriptorQualifier:
-                m_descriptor = kQualifierDescriptor;
-                length = static_cast<std::uint8_t>(kQualifierDescriptorSize);
-                break;
             default:
+                break;
+            }
+
+            if (descriptor == nullptr)
+            {
                 length = kStall;
                 break;
             }
 
-            if (length != kStall)
+            // bLength is the first byte of every USB descriptor.
+            m_descriptor = descriptor;
+            length = descriptor[0];
+            if (m_setup_length > length)
             {
-                if (m_setup_length > length)
-                {
-                    m_setup_length = length;
-                }
-                length = m_setup_length >= kEp0Size ? kEp0Size : m_setup_length;
-                std::memcpy(m_ep0_buffer, m_descriptor, length);
-                m_setup_length = static_cast<std::uint8_t>(m_setup_length - length);
-                m_descriptor += length;
+                m_setup_length = length;
             }
+            length = m_setup_length >= kEp0Size ? kEp0Size : m_setup_length;
+            std::memcpy(m_ep0_buffer, m_descriptor, length);
+            m_setup_length = static_cast<std::uint8_t>(m_setup_length - length);
+            m_descriptor += length;
             break;
         }
 
@@ -609,7 +590,7 @@ void Ch341Serial::process_irq()
             {
                 usbreg::ep0_t_len() = length;
                 usbreg::ep0_ctrl() ^= usbreg::kUepTTog;
-                set_in_status(0, kInAck);
+                usbreg::ep0_ctrl() &= ~0x03u;
             }
             else
             {
@@ -890,12 +871,6 @@ std::uint32_t Ch341Serial::ch341_baud_rate(std::uint8_t divider_high, std::uint8
         return 115200;
     }
     return reference_clock / divider;
-}
-
-void Ch341Serial::set_in_status(std::uint8_t endpoint, std::uint8_t status)
-{
-    auto &control = usbreg::at<std::uint8_t>(0x22u + endpoint * 4u);
-    control = static_cast<std::uint8_t>((control & ~0x03u) | status);
 }
 
 } // namespace ch572::usb

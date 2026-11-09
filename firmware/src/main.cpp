@@ -8,6 +8,13 @@
 #include "ch572/radio/rf_uart.hpp"
 #include "ch572/usb/ch341.hpp"
 
+namespace {
+
+constexpr std::uint32_t kBlinkTicks = 50u * 1000u * 1000u;       // 500 ms at 100 MHz
+constexpr std::uint32_t kIapFallbackTicks = 5u * 100u * 1000u * 1000u; // 5 s at 100 MHz
+
+} // namespace
+
 int main()
 {
     using namespace ch572;
@@ -16,8 +23,6 @@ int main()
         sysreg::SafeAccess access;
         sysreg::reset_watchdog_ctrl() &= ~0x06u;
     }
-
-    constexpr std::uint32_t kBlinkTicks = 50u * 1000u * 1000u; // 500 ms at 100 MHz
 
     hal::Led led;
     led.init();
@@ -51,7 +56,7 @@ int main()
         {
             usb.poll();
             sysreg::iwdg_feed();
-            if ((systick::now() - enum_start) > (5u * 100u * 1000u * 1000u))
+            if ((systick::now() - enum_start) > kIapFallbackTicks)
             {
                 iap::jump();
             }
@@ -68,7 +73,6 @@ int main()
     // If the application cannot get its USB enumerated, reboot into the IAP
     // bootloader so the board is always reachable over USB without a power
     // cycle or the debug link.
-    constexpr std::uint32_t kIapFallbackTicks = 5u * 100u * 1000u * 1000u;
     std::uint32_t last_enumerated = systick::now();
 
     for (;;)

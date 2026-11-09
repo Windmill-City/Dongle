@@ -9,7 +9,7 @@ namespace ch572::rf {
 
 using Status = std::uint8_t;
 using RoleState = std::uint32_t;
-using ProcessCallback = void (*)(RoleState state, std::uint8_t id);
+using ProcessCallback = void (*)(RoleState state);
 
 inline constexpr std::uint32_t kStateRx = 1u << 0;
 inline constexpr std::uint32_t kStateTimeout = 1u << 2;
@@ -96,11 +96,7 @@ Status stop() noexcept;
 Status shutdown() noexcept;
 void calibration() noexcept;
 void wakeup_reg_init() noexcept;
-void set_tx_power(std::uint8_t value) noexcept;
 CH572_HIGH_CODE std::uint8_t read_crc() noexcept;
-Status single_channel(std::uint8_t channel) noexcept;
-void test_end() noexcept;
-Status device_set_channel(std::uint32_t frequency, std::uint32_t properties) noexcept;
 
 CH572_HIGH_CODE void lle_irq_handler() noexcept;
 CH572_HIGH_CODE void bb_irq_handler() noexcept;

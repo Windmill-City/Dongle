@@ -12,8 +12,7 @@ CH572_HIGH_CODE std::uint32_t random16(std::uint32_t seed) noexcept
     static std::uint32_t state = 0;
     state += seed;
     state = state * 1664525u + 1013904223u;
-    const std::uint64_t wide = state;
-    return static_cast<std::uint32_t>((wide * 0xFFFFu) >> 32);
+    return state >> 16;
 }
 
 CH572_HIGH_CODE std::uint32_t random_access_address(std::uint16_t value) noexcept
@@ -79,61 +78,29 @@ void RfUart::init() noexcept
     start_rx(m_interval_timer);
 }
 
-void RfUart::on_status(rf::RoleState state, std::uint8_t id) noexcept
+void RfUart::on_status(rf::RoleState state) noexcept
 {
-    (void)id;
     if (g_instance == nullptr)
     {
         return;
     }
 
+    auto *self = g_instance;
     if ((state & rf::kStateRx) != 0)
     {
-        on_rx(reinterpret_cast<Packet *>(&g_instance->m_rx_buffer[0]));
+        self->process_rx(reinterpret_cast<Packet *>(&self->m_rx_buffer[0]));
     }
     if ((state & rf::kStateCrcError) != 0)
     {
-        on_crc_error();
+        self->process_crc_error();
     }
     if ((state & rf::kStateTxFinish) != 0)
     {
-        on_tx();
+        self->process_tx();
     }
     if ((state & rf::kStateTimeout) != 0)
     {
-        on_timeout();
-    }
-}
-
-void RfUart::on_rx(Packet *packet) noexcept
-{
-    if (g_instance != nullptr)
-    {
-        g_instance->process_rx(packet);
-    }
-}
-
-void RfUart::on_tx() noexcept
-{
-    if (g_instance != nullptr)
-    {
-        g_instance->process_tx();
-    }
-}
-
-void RfUart::on_crc_error() noexcept
-{
-    if (g_instance != nullptr)
-    {
-        g_instance->process_crc_error();
-    }
-}
-
-void RfUart::on_timeout() noexcept
-{
-    if (g_instance != nullptr)
-    {
-        g_instance->process_timeout();
+        self->process_timeout();
     }
 }
 

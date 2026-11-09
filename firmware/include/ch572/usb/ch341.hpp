@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "ch572/config.hpp"
+#include "ch572/platform/registers.hpp"
 #include "ch572/usb/descriptors.hpp"
 #include "ch572/util/ring_buffer.hpp"
 
@@ -41,7 +42,7 @@ public:
 
     CH572_HIGH_CODE HostReadResult read_host(void *dst, std::size_t max_length);
     const LineCoding &line_coding() const noexcept { return m_line_coding; }
-    bool enumerated() const noexcept { return (usbreg_dev_addr() & 0x7Fu) != 0; }
+    bool enumerated() const noexcept { return (usbreg::dev_addr() & 0x7Fu) != 0; }
     bool iap_requested() const noexcept { return m_iap_request; }
 
 private:
@@ -52,7 +53,6 @@ private:
     static constexpr std::size_t kUsbBufferSize = 256;
     static constexpr std::size_t kCh341RegisterCount = 10;
     static constexpr std::size_t kIrqQueueDepth = 4;
-    static constexpr std::uint8_t kInAck = 0;
     static constexpr std::uint8_t kInNak = 2;
     static constexpr std::uint8_t kAddressFlag = 0x04;
 
@@ -84,9 +84,6 @@ private:
     CH572_HIGH_CODE void ch341_register_write(std::uint8_t address, std::uint8_t value);
     CH572_HIGH_CODE std::uint8_t ch341_register_read(std::uint8_t address, std::uint8_t *value);
     CH572_HIGH_CODE static std::uint32_t ch341_baud_rate(std::uint8_t divider_high, std::uint8_t divider_low);
-    static void set_in_status(std::uint8_t endpoint, std::uint8_t status);
-
-    static std::uint8_t usbreg_dev_addr() noexcept;
 
     DeviceInfo m_device_info;
     std::uint8_t m_setup_request = 0;
