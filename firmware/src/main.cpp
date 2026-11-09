@@ -138,7 +138,7 @@ int main()
     hal::uart::init(115200);
     hal::uart::puts("\r\nCH570Q UART debug\r\n");
 #else
-    systick::start_free_running();
+    systick::start(100000u);
 #endif
 
     auto &usb = usb::Ch341Serial::instance();

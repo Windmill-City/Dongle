@@ -4,6 +4,7 @@
 
 #include "ch572/platform/flash.hpp"
 #include "ch572/platform/registers.hpp"
+#include "ch572/platform/systick.hpp"
 
 namespace ch572::usb {
 namespace {
@@ -426,10 +427,8 @@ void IspDevice::jump_to_app() noexcept
     usbreg::ctrl() = usbreg::kUcResetSie;
     sysreg::pin_alternate() &= ~(sysreg::kPinUsbEnable | sysreg::kUdpPullUpEnable);
 
-    for (volatile std::uint32_t i = 0; i < 200000u; ++i)
-    {
-        nop();
-    }
+    // Give the host time to notice the disconnect before handing over.
+    systick::delay_ms(10u);
 
     // Do not touch mstatus here. Writing it from this context traps as an
     // illegal instruction on the CH570Q QingKe core, and the application's

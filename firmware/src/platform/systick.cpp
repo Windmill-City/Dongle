@@ -7,34 +7,20 @@ namespace {
 
 constexpr std::uint32_t kCtlrStre = 1u << 3;
 constexpr std::uint32_t kCtlrStclk = 1u << 2;
-constexpr std::uint32_t kCtlrStie = 1u << 1;
 constexpr std::uint32_t kCtlrSte = 1u << 0;
 constexpr std::uint32_t kReloadMax = 0xFFFFFFFFu;
 
 } // namespace
 
-void start_free_running() noexcept
+void start(std::uint32_t ticks_per_ms) noexcept
 {
+    g_ticks_per_ms = ticks_per_ms;
+
     auto &timer = systick_regs();
+    timer.ctlr = 0;
     timer.cntl = 0;
     timer.cmpl = kReloadMax;
     timer.ctlr = kCtlrStre | kCtlrStclk | kCtlrSte;
-}
-
-void start_periodic(std::uint32_t ticks) noexcept
-{
-    auto &timer = systick_regs();
-    timer.ctlr = 0;
-    timer.sr = 0;
-    timer.cntl = 0;
-    timer.cmpl = ticks - 1u;
-    enable_irq(Irq::SysTick);
-    timer.ctlr = kCtlrStre | kCtlrStclk | kCtlrStie | kCtlrSte;
-}
-
-std::uint32_t now() noexcept
-{
-    return systick_regs().cntl;
 }
 
 } // namespace ch572::systick
