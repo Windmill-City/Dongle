@@ -34,7 +34,7 @@ CXX_SOURCES   := $(COMMON_CXX) $(IAP_CXX) src/platform/flash.cpp
 LIBS          := -lm
 LDSCRIPT      := ld/ch572_iap.ld
 else
-CXX_SOURCES   := $(COMMON_CXX) $(APP_CXX) src/platform/flash.cpp
+CXX_SOURCES   := $(COMMON_CXX) $(APP_CXX)
 LIBS          := -lm
 LDSCRIPT      := ld/ch572_app.ld
 endif

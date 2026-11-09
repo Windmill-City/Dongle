@@ -147,12 +147,10 @@ CH340/USB-TTL 接线：
 
 | 目标 | Flash | RAM |
 |------|-------|-----|
-| 应用 `rf_uart_dongle_iap` | 11688 B（约 11.4 KiB） | 7208 B（约 7.0 KiB） |
-| 引导程序 `rf_uart_iap` | 4684 B（约 4.6 KiB） | 2940 B（约 2.9 KiB） |
+| 应用 `rf_uart_dongle_iap` | 11700 B（约 11.4 KiB） | 6248 B（约 6.1 KiB） |
+| 引导程序 `rf_uart_iap` | 4592 B（约 4.5 KiB） | 2636 B（约 2.6 KiB） |
 
 - 应用 Flash 可用 232 KiB，引导程序可用 8 KiB，RAM 均为 12 KiB。
-- 链接时启用 `-Wl,--gc-sections`，未引用的函数（如应用中的 `flash::verify`）
-  会被裁剪，因此两个目标中同一份驱动的占用略有差异。
 
 ## 验证状态
 

@@ -30,10 +30,10 @@ void blink(int count) noexcept
 
 } // namespace
 
-// Run the whole bootloader from RAM. Executing the ISP poll loop from flash
-// at 100 MHz is far too slow: the USB device is polled late and the host
-// reports a descriptor failure, and the heartbeat blink stretches to seconds.
-CH572_HIGH_CODE int main()
+// Only the time-critical ISP paths (IspDevice) are copied to RAM. main itself
+// stays in flash: the USB setup handling that must beat the host's timeout
+// runs from the highcode ISR, so the loop body here is not critical.
+int main()
 {
     using namespace ch572;
 

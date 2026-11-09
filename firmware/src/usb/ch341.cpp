@@ -580,7 +580,7 @@ void Ch341Serial::irq_handler()
     }
 }
 
-CH572_HIGH_CODE void Ch341Serial::process_irq()
+void Ch341Serial::process_irq()
 {
     const std::uint8_t index = m_irq_read_index;
     m_irq_read_index = static_cast<std::uint8_t>((m_irq_read_index + 1) % kIrqQueueDepth);
@@ -672,7 +672,7 @@ CH572_HIGH_CODE void Ch341Serial::process_irq()
     }
 }
 
-CH572_HIGH_CODE void Ch341Serial::poll()
+void Ch341Serial::poll()
 {
     const std::uint8_t index = m_irq_read_index;
     if (m_irq_pending[index] != 0)
