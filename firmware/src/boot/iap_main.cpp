@@ -67,8 +67,13 @@ int main()
     // Leave for the application before touching the clock or the debug pins.
     // The app runs its own SetSysClock(); initialising the PLL here and then
     // again in the app hangs the second PLL setup.
+    //
+    // Set the flag to IAP before handing over: the application clears it with
+    // app_ok() once it is running. If it resets before that, the next boot
+    // stays in ISP instead of looping in a broken application.
     if (!iap::requested())
     {
+        iap::request();
         usb::IspDevice::jump_to_app();
     }
 

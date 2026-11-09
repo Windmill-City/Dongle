@@ -15,6 +15,16 @@ constexpr std::uint8_t kRequestUartInit = 0xA1;
 constexpr std::uint8_t kRequestUartModemOut = 0xA4;
 constexpr std::uint8_t kRequestGetVersion = 0x5F;
 
+// Out-of-band IAP control. A vendor control request cannot collide with the
+// transparent RF data stream, so no byte pattern in the payload can trigger a
+// jump or a bootloader update.
+constexpr std::uint8_t kRequestIapControl = 0xB1;
+constexpr std::uint8_t kIapMarker = 0x5A;
+constexpr std::uint8_t kIapTokenLow = 0x41;  // "AI"
+constexpr std::uint8_t kIapTokenHigh = 0x49; // "I"
+constexpr std::uint8_t kIapCommandJump = 0x01;
+constexpr std::uint8_t kIapCommandBoot = 0x02;
+
 constexpr std::uint8_t kClassSetLineCoding = 0x20;
 constexpr std::uint8_t kClassGetLineCoding = 0x21;
 constexpr std::uint8_t kClassSetControlLineState = 0x22;
@@ -44,6 +54,8 @@ Ch341Serial &Ch341Serial::instance()
 void Ch341Serial::init()
 {
     sysreg::pin_alternate() &= ~sysreg::kPinDebugEnable;
+    m_iap_request = false;
+    m_iap_update_request = false;
     device_parameters_init();
     vendor_init();
     enable_irq(Irq::Usb);
@@ -190,6 +202,28 @@ void Ch341Serial::handle_setup()
             m_ep0_buffer[0] = 0x30;
             m_ep0_buffer[1] = 0x00;
             m_setup_length = length;
+            break;
+        }
+
+        case kRequestIapControl:
+        {
+            // bmRequestType = 0x40 (vendor, host-to-device, device).
+            // wValue = 0x5A01 (jump to IAP) or 0x5A02 (bootloader update).
+            // wIndex = 0x4941 acts as a token so stray vendor requests from a
+            // generic driver cannot arm the device.
+            const bool valid = data_direction == 0 && setup->length_l == 0 &&
+                               setup->length_h == 0 &&
+                               setup->value_h == kIapMarker &&
+                               setup->index_l == kIapTokenLow &&
+                               setup->index_h == kIapTokenHigh;
+            if (valid && setup->value_l == kIapCommandJump)
+            {
+                m_iap_request = true;
+            }
+            else if (valid && setup->value_l == kIapCommandBoot)
+            {
+                m_iap_update_request = true;
+            }
             break;
         }
 
@@ -371,24 +405,6 @@ void Ch341Serial::irq_handler()
                     usbreg::ep2_ctrl() ^= usbreg::kUepRTog;
                     m_rx_buffer.write(m_ep2_buffer, length);
 
-                    static constexpr std::uint8_t kIapMagic[] = {0x55, 0xAA, 0x49, 0x41, 0x50};
-                    for (std::size_t i = 0; i < length; ++i)
-                    {
-                        const std::uint8_t value = m_ep2_buffer[i];
-                        if (value == kIapMagic[m_iap_match])
-                        {
-                            ++m_iap_match;
-                            if (m_iap_match == sizeof(kIapMagic))
-                            {
-                                m_iap_match = 0;
-                                m_iap_request = true;
-                            }
-                        }
-                        else
-                        {
-                            m_iap_match = (value == kIapMagic[0]) ? 1u : 0u;
-                        }
-                    }
                     if (m_rx_buffer.size() > (kUsbBufferSize - kPacketSize))
                     {
                         usbreg::ep2_ctrl() = (usbreg::ep2_ctrl() & ~usbreg::kMaskUepRRes) | usbreg::kUepRResNak;

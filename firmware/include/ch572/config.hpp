@@ -15,6 +15,8 @@
 namespace ch572 {
 
 // Flash layout shared by the application and the IAP bootloader.
+inline constexpr std::uint32_t kIapStart = 0x00000000u;
+inline constexpr std::uint32_t kIapEnd = 0x00002000u;
 inline constexpr std::uint32_t kAppStart = 0x00002000u;
 inline constexpr std::uint32_t kAppEnd = 0x0003C000u;
 inline constexpr std::uint32_t kFlashEnd = kAppEnd;

@@ -13,8 +13,10 @@
   与单调递增的 `sequence`。
 - 板载 LED：USB 未枚举时 500 ms 闪烁，枚举成功后常亮。
 - 100 MHz 系统时钟（32 MHz HSE + PLL）。
-- 支持 USB IAP 升级：应用可通过串口魔术字主动进入引导程序，USB 枚举失败
-  5 s 后也会自动回退到引导程序。
+- 支持 USB IAP 升级：应用通过 USB 厂商控制请求主动进入引导程序；普通串口
+  数据不再触发升级。
+- 支持在应用运行中通过 USB 直接重写 `0x0000–0x1FFF` 的 IAP 引导程序
+  （带整区 CRC 校验），同样使用厂商控制请求进入更新模式。
 
 ## 目录结构
 
@@ -38,7 +40,7 @@ firmware/
 │  ├─ radio/
 │  └─ main.cpp
 ├─ sdk/               WCH 外设库（仅作参考，已不参与构建）
-└─ tools/             USB IAP、IAP 魔术字、HEX 合并脚本
+└─ tools/             USB IAP、IAP 厂商请求、引导区更新、HEX 合并脚本
 ```
 
 ## 分层
@@ -134,21 +136,55 @@ CH340/USB-TTL 接线：
 | 应用 | `0x00002000`–`0x0003BFFF` | 232 KiB |
 
 - IAP 标志放在 SRAM 的 `.noinit` 区（`0x20002FF0`），软复位后仍保留，不占用 Flash。
-- 标志值 `0xAA` 表示应用有效，`0x55` 表示请求进入 IAP；软复位、看门狗复位和
-  手动复位后标志仍然有效（应用请求 IAP 后若先被看门狗复位也能进入 ISP），
-  上电复位会丢弃 SRAM 中的旧值。
-- 应用运行中收到 USB 串口魔术字 `55 AA 49 41 50` 后写入 `0x55` 并软复位，
+- 标志值 `0xAA` 表示应用初始化完成，`0x55` 表示下一个目标仍是 IAP；软复位、
+  看门狗复位和手动复位后标志仍然有效，上电复位会丢弃 SRAM 中的旧值。
+- 引导程序在跳转应用前先写入 `0x55`，应用仅在 USB 枚举和射频初始化成功后
+  写入 `0xAA`。因此应用启动阶段若复位，引导程序会停留在 ISP，而不是反复
+  启动损坏的应用。
+- 运行时进入 IAP 使用 USB 厂商控制请求（EP0），不经过串口数据流：
+  `bmRequestType=0x40`、`bRequest=0xB1`、`wValue=0x5A01`、`wIndex=0x4941`。
   引导程序随后进入 USB ISP。
 - USB ISP 设备为 `VID:PID = 4348:55E0`，命令：`0x80` 编程、`0x81` 擦除、
   `0x82` 校验、`0x83` 结束并跳转应用。
 - 引导程序保留在 `0x00000000`，应用升级只擦写 `0x00002000` 之后的区域。
+- 应用自身也可以更新引导程序区：厂商请求 `wValue=0x5A02` 进入更新模式后，
+  直接擦写 `0x00000000`–`0x00001FFF`，最后用整区 CRC32 校验并复位。
+  `0x00000000` 的链接和烧写只在应用里发生，引导程序本身无法擦除自己。
+
+运行时触发（需要 `pyusb`；Windows 需 UsbDk 或 WinUSB/libusbK）：
+
+```sh
+python tools/iap_trigger.py          # 跳转到 IAP 引导程序
+python tools/iap_trigger.py --boot   # 进入引导程序区更新模式
+```
+
+### 更新 IAP 引导程序区（应用运行中）
+
+使用 `tools/app_boot_update.py`，先通过 `tools/iap_trigger.py` 的厂商控制请求
+（`wValue=0x5A02`）进入更新模式，再通过应用的 CH341 串口
+（`VID:PID = 1A86:7523`）发送新的 8 KiB 引导程序镜像：
+
+```sh
+python tools/app_boot_update.py build/boot/rf_uart_iap.bin COM5
+```
+
+运行时触发依赖 `pyusb` 能在 CH341 驱动占用设备时发送控制请求（Windows 需
+UsbDk 或 WinUSB/libusbK）。无法发送控制请求时，用 SWD 或串口 ISP 恢复/烧录。
+
+- 镜像可以是 `.bin`，也可以是起始地址为 `0x0` 的 `.hex`；不足 8 KiB 的部分
+  用 `0xFF` 填充。
+- 帧格式：`A5 | CMD | LEN_LO LEN_HI | PAYLOAD | XOR`，每条命令回一个状态字节。
+  `0x01` 擦除、`0x02` 写数据、`0x03` 校验、`0x04` 结束（4 字节 CRC32）、
+  `0x05` 中止（仅在擦除前可用）。
+- 擦除开始后必须完整写入并通过 CRC 才会复位；更新过程中掉电时 `0x0` 可能
+  只剩下不完整的引导程序，需要用 SWD 或串口 ISP 恢复。
 
 ## 资源占用（默认配置，GCC 15 `-Os`）
 
 | 目标 | Flash | RAM |
 |------|-------|-----|
-| 应用 `rf_uart_dongle_iap` | 10632 B（约 10.4 KiB） | 6596 B（约 6.4 KiB） |
-| 引导程序 `rf_uart_iap` | 4620 B（约 4.5 KiB） | 3252 B（约 3.2 KiB） |
+| 应用 `rf_uart_dongle_iap` | 12936 B（约 12.6 KiB） | 7652 B（约 7.5 KiB） |
+| 引导程序 `rf_uart_iap` | 4652 B（约 4.5 KiB） | 3252 B（约 3.2 KiB） |
 
 - 应用 Flash 可用 232 KiB，引导程序可用 8 KiB，RAM 均为 12 KiB。
 
@@ -158,4 +194,5 @@ CH340/USB-TTL 接线：
 - `make iap_boot`：通过。
 - 串口 ISP 烧录（wchisp，CH570/CH572）：通过。
 - 自包含闪存驱动：编译和链接通过，擦写时序需要实机验证。
+- 应用内更新 IAP 引导程序区：编译和链接通过，需实机验证擦写与复位流程。
 - USB 枚举、2.4 GHz 配对和透传：需要实机验证。

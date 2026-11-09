@@ -109,6 +109,13 @@ inline void enable_irq(Irq irq) noexcept
     pfic().ienr[index] = bit;
 }
 
+inline void disable_irq(Irq irq) noexcept
+{
+    const auto index = static_cast<std::uint32_t>(irq) >> 5;
+    const auto bit = 1u << (static_cast<std::uint32_t>(irq) & 0x1Fu);
+    pfic().irer[index] = bit;
+}
+
 // ---------------------------------------------------------------------------
 // System control registers
 // ---------------------------------------------------------------------------
@@ -244,6 +251,17 @@ inline void disable_watchdog_reset() noexcept
 {
     SafeAccess access;
     reset_watchdog_ctrl() &= ~0x06u;
+}
+
+// Trigger a software reset without touching the SRAM IAP request flag, so the
+// bootloader boots normally instead of entering ISP.
+[[noreturn]] inline void software_reset() noexcept
+{
+    SafeAccess access;
+    reset_watchdog_ctrl() |= kSoftwareReset;
+    for (;;)
+    {
+    }
 }
 
 } // namespace sysreg

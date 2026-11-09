@@ -24,6 +24,7 @@ INCLUDES      := -Iinclude
 COMMON_CXX    := src/platform/gpio.cpp src/platform/clock.cpp \
                  src/platform/fault.cpp src/platform/iap_flag.cpp
 APP_CXX       := src/main.cpp src/platform/systick.cpp \
+                 src/platform/flash.cpp src/boot/iap_update.cpp \
                  src/hal/led.cpp \
                  src/usb/ch341.cpp \
                  src/radio/rfip.cpp src/radio/rf_uart.cpp src/radio/rfend.cpp

@@ -14,8 +14,8 @@ namespace {
 // reset executes, the IWDG is what delivers the request. Power-on (and
 // shutdown wake) must discard stale SRAM contents instead.
 constexpr std::uint32_t kFlagMagic = 0x00494150u; // "IAP"
-constexpr std::uint8_t kFlagApp = 0xAAu;
-constexpr std::uint8_t kFlagIap = 0x55u;
+constexpr std::uint8_t kFlagApp = 0xAAu;          // application confirmed
+constexpr std::uint8_t kFlagIap = 0x55u;          // explicit IAP request
 
 struct Flag
 {
@@ -57,9 +57,14 @@ void app_ok() noexcept
     set_flag(kFlagApp);
 }
 
-void jump() noexcept
+void request() noexcept
 {
     set_flag(kFlagIap);
+}
+
+void jump() noexcept
+{
+    request();
     sysreg::SafeAccess access;
     sysreg::reset_watchdog_ctrl() |= sysreg::kSoftwareReset;
     for (;;)

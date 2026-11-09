@@ -1,6 +1,7 @@
 #include <cstdint>
 
 #include "ch572/boot/iap_flag.hpp"
+#include "ch572/boot/iap_update.hpp"
 #include "ch572/hal/led.hpp"
 #include "ch572/platform/clock.hpp"
 #include "ch572/platform/registers.hpp"
@@ -10,8 +11,7 @@
 
 namespace {
 
-constexpr std::uint32_t kBlinkTicks = 50u * 1000u * 1000u;       // 500 ms at 100 MHz
-constexpr std::uint32_t kIapFallbackTicks = 5u * 100u * 1000u * 1000u; // 5 s at 100 MHz
+constexpr std::uint32_t kBlinkTicks = 50u * 1000u * 1000u; // 500 ms at 100 MHz
 
 } // namespace
 
@@ -30,39 +30,23 @@ int main()
 
     clock::set_hse_capacitance(clock::HseCapacitance::p8);
     clock::init_100mhz();
-    iap::app_ok();
+    systick::start(100000u);
 
-    // Arm the independent watchdog at 5 s. The 8-bit Fsys/131072 watchdog can
-    // only reach ~0.33 s at 100 MHz, which is too short for USB enumeration
-    // and radio init. 5 s still resets back to the ISP-only bootloader if the
-    // app hangs.
     sysreg::iwdg_start_5s();
 
-    systick::start(100000u);
 
     auto &usb = usb::Ch341Serial::instance();
     usb.init();
 
-    // Wait for enumeration before touching the radio. Polling USB in a tight
-    // loop here also gives the setup packets a much better chance than being
-    // deferred behind the (flash-resident, slow) RF init. If the device never
-    // enumerates, return to the IAP bootloader so the board stays reachable.
-    {
-        const std::uint32_t enum_start = systick::now();
-        while (!usb.enumerated())
-        {
-            usb.poll();
-            sysreg::iwdg_feed();
-            if ((systick::now() - enum_start) > kIapFallbackTicks)
-            {
-                iap::jump();
-            }
-        }
-    }
+    while (!usb.enumerated())
+        usb.poll();
+    sysreg::iwdg_feed();
 
     rf_uart::RfUart rf(usb);
     usb.set_source(&rf);
     rf.init();
+
+    iap::app_ok();
 
     std::uint32_t last_blink = systick::now();
 
@@ -74,6 +58,14 @@ int main()
         if (usb.iap_requested())
         {
             iap::jump();
+        }
+
+        if (usb.iap_update_requested())
+        {
+            rf::shutdown();
+            disable_irq(Irq::BleBb);
+            disable_irq(Irq::BleLle);
+            iap::update_iap_region(usb);
         }
 
         const std::uint32_t now = systick::now();

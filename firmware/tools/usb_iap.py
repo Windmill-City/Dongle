@@ -11,6 +11,10 @@ CH375DLL (no extra driver install). Commands (bulk EP2 OUT):
     0x83 end       [0x83, 0]                 reply, then jump to the app
 
 Every command is answered with two bytes [status, 0]; status 0 means success.
+
+Use --trigger to send the application IAP vendor request (EP0) before opening
+the bootloader. The application never enters IAP from serial payload bytes, so
+this request is the only runtime path into the bootloader.
 """
 
 import argparse
@@ -18,6 +22,8 @@ import ctypes
 import os
 import sys
 import time
+
+import iap_trigger
 
 APP_START = 0x00002000
 APP_END = 0x0003C000
@@ -59,13 +65,17 @@ class Ch375:
         self.dll.CH375ReadData.restype = ctypes.c_ulong
         self.handle = None
 
-    def open(self, timeout_ms=10000):
-        for index in range(4):
-            handle = self.dll.CH375OpenDevice(index)
-            if handle not in (0, 0xFFFFFFFF):
-                self.handle = handle
-                self.dll.CH375SetTimeout(handle, timeout_ms, timeout_ms)
-                return
+    def open(self, timeout_ms=10000, attempts=40, delay=0.25):
+        # The application resets into the bootloader, so the device may need a
+        # moment to re-enumerate after the vendor trigger.
+        for _ in range(attempts):
+            for index in range(4):
+                handle = self.dll.CH375OpenDevice(index)
+                if handle not in (0, 0xFFFFFFFF):
+                    self.handle = handle
+                    self.dll.CH375SetTimeout(handle, timeout_ms, timeout_ms)
+                    return
+            time.sleep(delay)
         raise SystemExit("IAP device not found (VID:PID 4348:55E0)")
 
     def close(self):
@@ -148,14 +158,6 @@ def load_image(path):
     return image
 
 
-def trigger_iap(port):
-    import serial
-    with serial.Serial(port, 115200, timeout=1) as handle:
-        handle.write(bytes([0x55, 0xAA, 0x49, 0x41, 0x50]))
-        handle.flush()
-    print(f"sent IAP magic on {port}")
-
-
 def flash(link, image, do_verify=True):
     status = link.command(bytes([0x81, 0x00, APP_START & 0xFF,
                                  (APP_START >> 8) & 0xFF,
@@ -208,8 +210,8 @@ def main():
     parser = argparse.ArgumentParser(description="USB IAP flasher for the CH570Q dongle")
     parser.add_argument("image", help="application .bin or .hex")
     parser.add_argument("--dll", help="path to CH375DLL64.dll")
-    parser.add_argument("--trigger", metavar="COMx",
-                        help="send the IAP magic to a running app before flashing")
+    parser.add_argument("--trigger", action="store_true",
+                        help="send the IAP vendor request to a running app before flashing")
     parser.add_argument("--verify", action="store_true",
                         help="read back and compare after programming")
     args = parser.parse_args()
@@ -218,7 +220,8 @@ def main():
     print(f"image {args.image}: {len(image)} bytes at 0x{APP_START:08X}")
 
     if args.trigger:
-        trigger_iap(args.trigger)
+        iap_trigger.request(iap_trigger.CMD_JUMP)
+        print("sent IAP vendor request")
 
     link = Ch375(find_dll(args.dll))
     link.open()
