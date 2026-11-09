@@ -28,7 +28,7 @@ int main()
 
     clock::set_hse_capacitance(clock::HseCapacitance::p8);
     clock::init_100mhz();
-    iap::mark_app_valid();
+    iap::app_ok();
 
     // Arm the independent watchdog at 5 s. The 8-bit Fsys/131072 watchdog can
     // only reach ~0.33 s at 100 MHz, which is too short for USB enumeration
@@ -53,7 +53,7 @@ int main()
             sysreg::iwdg_feed();
             if ((systick::now() - enum_start) > (5u * 100u * 1000u * 1000u))
             {
-                iap::jump_to_iap();
+                iap::jump();
             }
         }
     }
@@ -78,7 +78,7 @@ int main()
 
         if (usb.iap_requested())
         {
-            iap::jump_to_iap();
+            iap::jump();
         }
         if (usb.enumerated())
         {
@@ -86,7 +86,7 @@ int main()
         }
         else if ((systick::now() - last_enumerated) > kIapFallbackTicks)
         {
-            iap::jump_to_iap();
+            iap::jump();
         }
 
         const std::uint32_t now = systick::now();

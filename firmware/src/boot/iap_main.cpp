@@ -69,7 +69,7 @@ CH572_HIGH_CODE int main()
     // Leave for the application before touching the clock or the debug pins.
     // The app runs its own SetSysClock(); initialising the PLL here and then
     // again in the app hangs the second PLL setup.
-    if (!iap::is_iap_requested())
+    if (!iap::requested())
     {
         usb::IspDevice::jump_to_app();
     }

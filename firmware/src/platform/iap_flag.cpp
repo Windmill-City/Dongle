@@ -7,7 +7,7 @@
 namespace ch572::iap {
 namespace {
 
-// jump_to_iap() requests the next boot by issuing a software reset, so the
+// jump() requests the next boot by issuing a software reset, so the
 // request has to outlive the reset. Keep it in the .noinit block at the top of
 // SRAM, which the startup code does not clear. A watchdog reset must keep it
 // too: if the application dies after requesting IAP but before the software
@@ -47,17 +47,17 @@ void set_flag(std::uint8_t value) noexcept
 
 } // namespace
 
-bool is_iap_requested() noexcept
+bool requested() noexcept
 {
     return is_valid() && g_flag.value == kFlagIap;
 }
 
-void mark_app_valid() noexcept
+void app_ok() noexcept
 {
     set_flag(kFlagApp);
 }
 
-void jump_to_iap() noexcept
+void jump() noexcept
 {
     set_flag(kFlagIap);
     sysreg::SafeAccess access;
