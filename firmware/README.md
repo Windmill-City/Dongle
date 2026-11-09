@@ -26,7 +26,7 @@ firmware/
 ├─ include/ch572/
 │  ├─ config.hpp
 │  ├─ platform/       寄存器、中断、时钟、GPIO、SysTick、Flash
-│  ├─ hal/            LED、UART
+│  ├─ hal/            LED
 │  ├─ usb/            USB 设备、CH341 兼容层、ISP、描述符
 │  ├─ radio/          RFIP/RFRole、RFEND 校准、RF UART 协议
 │  └─ util/           环形缓冲区

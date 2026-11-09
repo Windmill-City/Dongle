@@ -24,7 +24,7 @@ INCLUDES      := -Iinclude
 COMMON_CXX    := src/platform/gpio.cpp src/platform/clock.cpp \
                  src/platform/fault.cpp src/platform/iap_flag.cpp
 APP_CXX       := src/main.cpp src/platform/systick.cpp \
-                 src/hal/led.cpp src/hal/uart.cpp \
+                 src/hal/led.cpp \
                  src/usb/ch341.cpp src/usb/descriptors.cpp \
                  src/radio/rfip.cpp src/radio/rf_uart.cpp src/radio/rfend.cpp
 IAP_CXX       := src/boot/iap_main.cpp src/usb/isp.cpp src/platform/systick.cpp
@@ -33,7 +33,7 @@ ifdef IAP_BOOT
 CXX_SOURCES   := $(COMMON_CXX) $(IAP_CXX) src/platform/flash.cpp
 LIBS          := -lm
 LDSCRIPT      := ld/ch572_iap.ld
-else ifdef APP_IAP
+else
 CXX_SOURCES   := $(COMMON_CXX) $(APP_CXX) src/platform/flash.cpp
 LIBS          := -lm
 LDSCRIPT      := ld/ch572_app.ld
@@ -67,7 +67,7 @@ endif
 all: iap_app
 
 iap_app:
-	$(MAKE) BUILD=build/app TARGET=rf_uart_dongle_iap APP_IAP=1 CXXFLAGS="$(CXXFLAGS) -DAPP_IAP" build
+	$(MAKE) BUILD=build/app TARGET=rf_uart_dongle_iap build
 
 iap_boot:
 	$(MAKE) BUILD=build/boot TARGET=rf_uart_iap IAP_BOOT=1 CXXFLAGS="$(CXXFLAGS) -DIAP_BOOT" build
