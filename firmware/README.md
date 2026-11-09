@@ -13,6 +13,8 @@
   与单调递增的 `sequence`。
 - 板载 LED：USB 未枚举时 500 ms 闪烁，枚举成功后常亮。
 - 100 MHz 系统时钟（32 MHz HSE + PLL）。
+- 支持 USB IAP 升级：应用可通过串口魔术字主动进入引导程序，USB 枚举失败
+  5 s 后也会自动回退到引导程序。
 
 ## 目录结构
 
@@ -23,18 +25,20 @@ firmware/
 ├─ ld/ch572_iap.ld     引导程序链接脚本（0x0 起始）
 ├─ include/ch572/
 │  ├─ config.hpp
-│  ├─ platform/       寄存器、中断、时钟、GPIO、SysTick
-│  ├─ hal/            LED
-│  ├─ usb/            USB 设备、CH341 兼容层、描述符
+│  ├─ platform/       寄存器、中断、时钟、GPIO、SysTick、Flash
+│  ├─ hal/            LED、UART
+│  ├─ usb/            USB 设备、CH341 兼容层、ISP、描述符
 │  ├─ radio/          RFIP/RFRole、RFEND 校准、RF UART 协议
 │  └─ util/           环形缓冲区
 ├─ src/
-│  ├─ boot/startup_ch572.S
-│  ├─ platform/
+│  ├─ boot/           startup_ch572.S、iap_main.cpp
+│  ├─ platform/       寄存器、时钟、GPIO、SysTick、Flash、IAP 标志
 │  ├─ hal/
 │  ├─ usb/
 │  ├─ radio/
 │  └─ main.cpp
+├─ sdk/               WCH 外设库（仅作参考，已不参与构建）
+└─ tools/             USB IAP、IAP 魔术字、HEX 合并脚本
 ```
 
 ## 分层
@@ -122,13 +126,36 @@ CH340/USB-TTL 接线：
 1. **USB ISP**：WCHISPTool 选择 CH570，USB 下载；上电瞬间 PA1(D+) 为高。
 2. **SWD**：PA0=SWDIO、PA1=SWCLK，WCH-LinkE 直接下载调试。
 
-## 资源占用（默认配置）
+### IAP 与 Flash 布局
 
-- Flash：约 10.5 KiB / 240 KiB
-- RAM：约 5.2 KiB / 12 KiB
+| 区域 | 地址范围 | 大小 |
+|------|----------|------|
+| 引导程序 | `0x00000000`–`0x00001FFF` | 8 KiB |
+| 应用 | `0x00002000`–`0x0003AFFF` | 228 KiB |
+| IAP 标志页 | `0x0003B000`–`0x0003BFFF` | 4 KiB |
+
+- 标志页首字节 `0xAA` 表示应用有效，`0x55` 表示请求进入 IAP。
+- 应用运行中收到 USB 串口魔术字 `55 AA 49 41 50` 后写入 `0x55` 并软复位，
+  引导程序随后进入 USB ISP。
+- USB ISP 设备为 `VID:PID = 4348:55E0`，命令：`0x80` 编程、`0x81` 擦除、
+  `0x82` 校验、`0x83` 结束并跳转应用。
+- 引导程序保留在 `0x00000000`，应用升级只擦写 `0x00002000` 之后的区域。
+
+## 资源占用（默认配置，GCC 15 `-Os`）
+
+| 目标 | Flash | RAM |
+|------|-------|-----|
+| 应用 `rf_uart_dongle_iap` | 12672 B（约 12.4 KiB） | 7356 B（约 7.2 KiB） |
+| 引导程序 `rf_uart_iap` | 4628 B（约 4.5 KiB） | 2972 B（约 2.9 KiB） |
+
+- 应用 Flash 可用 228 KiB，引导程序可用 8 KiB，RAM 均为 12 KiB。
+- 链接时启用 `-Wl,--gc-sections`，未引用的函数（如应用中的 `flash::verify`）
+  会被裁剪，因此两个目标中同一份驱动的占用略有差异。
 
 ## 验证状态
 
 - `make`：通过。
+- `make iap_boot`：通过。
 - 串口 ISP 烧录（wchisp，CH570/CH572）：通过。
+- 自包含闪存驱动：编译和链接通过，擦写时序需要实机验证。
 - USB 枚举、2.4 GHz 配对和透传：需要实机验证。

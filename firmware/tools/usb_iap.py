@@ -211,7 +211,7 @@ def main():
     parser.add_argument("--trigger", metavar="COMx",
                         help="send the IAP magic to a running app before flashing")
     parser.add_argument("--verify", action="store_true",
-                        help="read back and compare after programming (the firmware verify path currently traps)")
+                        help="read back and compare after programming")
     args = parser.parse_args()
 
     image = load_image(args.image)

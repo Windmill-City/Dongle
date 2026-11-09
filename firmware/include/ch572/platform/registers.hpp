@@ -249,6 +249,42 @@ private:
 } // namespace sysreg
 
 // ---------------------------------------------------------------------------
+// Flash ROM controller (serial command interface)
+// ---------------------------------------------------------------------------
+
+namespace flashreg {
+
+inline volatile std::uint32_t &data32() noexcept
+{
+    return *reinterpret_cast<volatile std::uint32_t *>(0x40001800u);
+}
+inline volatile std::uint8_t &data8() noexcept
+{
+    return *reinterpret_cast<volatile std::uint8_t *>(0x40001804u);
+}
+inline volatile std::uint8_t &ctrl() noexcept
+{
+    return *reinterpret_cast<volatile std::uint8_t *>(0x40001806u);
+}
+inline volatile std::uint8_t &glob_rom_cfg() noexcept
+{
+    return *reinterpret_cast<volatile std::uint8_t *>(0x40001044u);
+}
+
+// R8_FLASH_CTRL
+inline constexpr std::uint8_t kEn = 0x01;
+inline constexpr std::uint8_t kReadAction = 0x04;
+inline constexpr std::uint8_t kShift = 0x10;
+inline constexpr std::uint8_t kAct = 0x80;
+
+// R8_GLOB_ROM_CFG
+inline constexpr std::uint8_t kRomCodeWe = 0xC0;
+inline constexpr std::uint8_t kRomCtrlEn = 0x20;
+inline constexpr std::uint8_t kRomCodeOfs = 0x10;
+
+} // namespace flashreg
+
+// ---------------------------------------------------------------------------
 // UART (only the line-control register is read for CH341 compatibility)
 // ---------------------------------------------------------------------------
 

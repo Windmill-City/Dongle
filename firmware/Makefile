@@ -19,7 +19,7 @@ CXXFLAGS      := $(ARCH) -Os -std=c++17 \
 ASFLAGS       := $(ARCH) -x assembler-with-cpp
 CFLAGS        := $(ARCH) -Os -ffunction-sections -fdata-sections -fno-common \
                  -Wall -Wextra -std=gnu11
-INCLUDES      := -Iinclude -Isdk/StdPeriphDriver/inc -Isdk/RVMSIS
+INCLUDES      := -Iinclude
 
 COMMON_CXX    := src/platform/gpio.cpp src/platform/clock.cpp \
                  src/platform/fault.cpp src/platform/iap_flag.cpp
@@ -31,13 +31,11 @@ IAP_CXX       := src/boot/iap_main.cpp src/usb/isp.cpp src/platform/systick.cpp
 
 ifdef IAP_BOOT
 CXX_SOURCES   := $(COMMON_CXX) $(IAP_CXX) src/platform/flash.cpp
-C_SOURCES     := sdk/StdPeriphDriver/CH57x_flash.c
-LIBS          := -Wl,--start-group -lm sdk/StdPeriphDriver/libISP572.a -Wl,--end-group
+LIBS          := -lm
 LDSCRIPT      := ld/ch572_iap.ld
 else ifdef APP_IAP
 CXX_SOURCES   := $(COMMON_CXX) $(APP_CXX) src/platform/flash.cpp
-C_SOURCES     := sdk/StdPeriphDriver/CH57x_flash.c
-LIBS          := -Wl,--start-group -lm sdk/StdPeriphDriver/libISP572.a -Wl,--end-group
+LIBS          := -lm
 LDSCRIPT      := ld/ch572_app.ld
 endif
 
