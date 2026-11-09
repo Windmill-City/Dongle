@@ -42,8 +42,6 @@ int main()
         sysreg::reset_watchdog_ctrl() &= ~0x06u;
     }
 
-    systick::start(6400u); // reset-default 6.4 MHz
-
 #if defined(IAP_DEBUG)
     gpio::clear(Pin::p7);
     gpio::configure(Pin::p7, gpio::Mode::output_push_pull_5ma);
@@ -66,6 +64,8 @@ int main()
         systick::delay_ms(100u);
     }
 #endif
+
+    systick::start(6400u); // reset-default 6.4 MHz
 
     // Leave for the application before touching the clock or the debug pins.
     // The app runs its own SetSysClock(); initialising the PLL here and then
