@@ -3,6 +3,9 @@
 #include "ch572/config.hpp"
 #include "ch572/platform/registers.hpp"
 #include "ch572/radio/rfend.hpp"
+#if defined(UART_DEBUG)
+#include "ch572/hal/uart.hpp"
+#endif
 
 
 namespace ch572::rf {
@@ -304,18 +307,41 @@ Status role_init(RoleConfig *config) noexcept
 
     g_role_config = *config;
     g_lle_process = &rf_basic_process;
+    sysreg::iwdg_feed();
 
+#if defined(UART_DEBUG)
+    hal::uart::puts("role_init\r\n");
+#endif
     rfend_block::dev_init();
+    sysreg::iwdg_feed();
+
+#if defined(UART_DEBUG)
+    hal::uart::puts("wakeup_reg_init\r\n");
+#endif
     wakeup_reg_init();
+    sysreg::iwdg_feed();
+
+#if defined(UART_DEBUG)
+    hal::uart::puts("calibration\r\n");
+#endif
     calibration();
+    sysreg::iwdg_feed();
 
     enable_irq(Irq::BleBb);
     enable_irq(Irq::BleLle);
+#if defined(UART_DEBUG)
+    hal::uart::puts("role_init done\r\n");
+#endif
     return 0;
 }
 
 void wakeup_reg_init() noexcept
 {
+    {
+        sysreg::SafeAccess access;
+        sysreg::sleep_clk_off1() &= ~0x80u;
+        sysreg::sleep_clk_off2() &= ~0x13u;
+    }
     Lle::r32(lle::Config) |= 0x1Eu;
     Lle::r32(lle::Config54) = 0;
     Lle::r32(lle::Config2) = 0x20003u;
@@ -328,7 +354,22 @@ void calibration() noexcept
 {
     Bb::r32(bb::Control) = (Bb::r32(bb::Control) & 0xFFFCFFFFu) | 0x200000u;
     RfEnd::r32(rfend_reg::Control2) |= 0x33000000u;
+    RfEnd::r32(rfend_reg::TxBias) |= 0x00000800u;
     Lle::r32(lle::PhyControl) = 0x000F05D8u;
+
+    for (int i = 0; i < 40; ++i)
+    {
+        nop();
+    }
+
+    RfEnd::r32(rfend_reg::Control3) |= 0x00001000u;
+    RfEnd::r32(rfend_reg::Control3) &= ~0x00001000u;
+    nop();
+    nop();
+    nop();
+    nop();
+    RfEnd::r32(rfend_reg::Control3) |= 0x00001000u;
+    RfEnd::r32(rfend_reg::TxBias) &= ~0x00000800u;
 
     rfend_block::calibration();
 

@@ -1,6 +1,9 @@
 #include "ch572/radio/rfend.hpp"
 
 #include "ch572/platform/registers.hpp"
+#if defined(UART_DEBUG)
+#include "ch572/hal/uart.hpp"
+#endif
 
 
 namespace ch572::rfend {
@@ -26,6 +29,10 @@ std::uint16_t g_ftune_flag = 0;
 std::uint8_t g_tune_filter = 0;
 std::uint8_t g_tune_filter_2m = 0;
 std::uint32_t g_wait_recv_time = 0;
+bool g_rx_filter_timeout = false;
+std::uint32_t g_timer_probe = 1;
+
+constexpr std::uint32_t kCalibrationTimeout = 10000000u;
 
 // Match the RISC-V DIV instruction's defined behaviour for a zero divisor.
 constexpr std::int32_t signed_div(std::int32_t lhs, std::int32_t rhs) noexcept
@@ -69,17 +76,26 @@ std::uint32_t tx_ctune_callx(std::int32_t index) noexcept
 
 void dev_init() noexcept
 {
+#if defined(UART_DEBUG)
+    hal::uart::puts("dev_init\r\n");
+#endif
     RfEnd::r32(off::TxBias) = 1152;
+    RfEnd::r32(off::Power) = (RfEnd::r32(off::Power) & 0xFFFF0FFFu) | 0x00008000u;
+    RfEnd::r32(off::TxControl) =
+        (RfEnd::r32(off::TxControl) & 0xFFFFCFFFu) | 0x00001000u;
+    RfEnd::r32(off::TxControl) =
+        (RfEnd::r32(off::TxControl) & 0xFFFCFFFFu) | 0x00010000u;
     RfEnd::r32(off::Power) = (RfEnd::r32(off::Power) & 0xF8FFFFFFu) | 0x20000000u;
     RfEnd::r32(off::Power) = (RfEnd::r32(off::Power) & 0x1FFFFFFFu) | 0x00040000u;
-    RfEnd::r32(off::TuneControl) = RfEnd::r32(off::TuneControl) & 0xFFF9FFFFu;
-    RfEnd::r32(off::TuneControl) =
-        (RfEnd::r32(off::TuneControl) & 0x8FFFFFFFu) | 0x00040000u;
-    RfEnd::r32(off::FilterControl) = RfEnd::r32(off::FilterControl) & 0xFFF8FFFFu;
+    RfEnd::r32(off::TxControl2) = RfEnd::r32(off::TxControl2) & 0xFFF9FFFFu;
+    RfEnd::r32(off::TxControl2) =
+        (RfEnd::r32(off::TxControl2) & 0x8FFFFFFFu) | 0x00040000u;
+    RfEnd::r32(off::TuneControl) = RfEnd::r32(off::TuneControl) & 0xFFF8FFFFu;
     RfEnd::r32(off::FilterControl) =
         (RfEnd::r32(off::FilterControl) & ~0x700u) | 0x300u;
     RfEnd::r32(off::RxControl) |= 0x00070000u;
-    RfEnd::r32(off::RxControl) |= 0x70000000u;
+    RfEnd::r32(off::RxControl) |= 0x07000000u;
+    RfEnd::r32(off::TxBias) |= 0x00000800u;
     for (int i = 0; i < 100; ++i)
     {
         nop();
@@ -117,13 +133,44 @@ void rx_filter() noexcept
     RfEnd::r32(off::Control) |= 0x00010000u;
 
     Lle::r32(lle::Timer) = 100;
-    while (Lle::r32(lle::Timer) != 0)
+    for (volatile std::uint32_t i = 0; i < 1000000u; ++i)
     {
+        if ((i & 0x3FFFu) == 0u)
+        {
+            sysreg::iwdg_feed();
+        }
+        nop();
+    }
+    const std::uint32_t probe = Lle::r32(lle::Timer);
+    g_timer_probe = (probe == 100u) ? 1u : ((probe == 0u) ? 3u : 2u);
+#if defined(UART_DEBUG)
+    hal::uart::puts("rx_filter probe=");
+    hal::uart::put_u32(g_timer_probe);
+    hal::uart::puts(" timer=");
+    hal::uart::put_u32(probe);
+    hal::uart::puts("\r\n");
+#endif
+
+    g_rx_filter_timeout = true;
+    for (std::uint32_t i = 0; i < kCalibrationTimeout; ++i)
+    {
+        if ((i & 0x3FFFu) == 0u)
+        {
+            sysreg::iwdg_feed();
+        }
         if ((RfEnd::r32(off::FilterResult) & 0x100u) != 0)
         {
+            g_rx_filter_timeout = false;
             break;
         }
     }
+#if defined(UART_DEBUG)
+    hal::uart::puts("rx_filter filter=");
+    hal::uart::put_hex32(RfEnd::r32(off::FilterResult));
+    hal::uart::puts(" timeout=");
+    hal::uart::put_u32(g_rx_filter_timeout ? 1u : 0u);
+    hal::uart::puts("\r\n");
+#endif
 
     nop();
     nop();
@@ -143,6 +190,16 @@ void rx_filter() noexcept
     }
 }
 
+bool rx_filter_timed_out() noexcept
+{
+    return g_rx_filter_timeout;
+}
+
+std::uint32_t timer_probe() noexcept
+{
+    return g_timer_probe;
+}
+
 void rx_adc() noexcept
 {
     RfEnd::r32(off::AdcControl) &= 0xFFFEFFFFu;
@@ -155,6 +212,11 @@ void rx_adc() noexcept
 
 void wait_tune(std::uint16_t cycles) noexcept
 {
+#if defined(UART_DEBUG)
+    hal::uart::puts("wait_tune ");
+    hal::uart::put_u32(cycles);
+    hal::uart::puts("\r\n");
+#endif
     RfEnd::r32(off::Control) &= ~1u;
     RfEnd::r32(off::DacRef) =
         (RfEnd::r32(off::DacRef) & 0xFFFE00FFu) |
@@ -162,8 +224,12 @@ void wait_tune(std::uint16_t cycles) noexcept
     RfEnd::r32(off::Control) |= 1u;
     Lle::r32(lle::Timer) = 0x1F40u;
 
-    for (;;)
+    for (std::uint32_t i = 0; i < kCalibrationTimeout; ++i)
     {
+        if ((i & 0x3FFFu) == 0u)
+        {
+            sysreg::iwdg_feed();
+        }
         if (Lle::r32(lle::Timer) == 0)
         {
             break;
@@ -174,6 +240,14 @@ void wait_tune(std::uint16_t cycles) noexcept
             break;
         }
     }
+
+#if defined(UART_DEBUG)
+    hal::uart::puts("  timer=");
+    hal::uart::put_u32(Lle::r32(lle::Timer));
+    hal::uart::puts(" result=");
+    hal::uart::put_hex32(RfEnd::r32(off::TuneResult));
+    hal::uart::puts("\r\n");
+#endif
 }
 
 void tx_ftune() noexcept
@@ -219,7 +293,7 @@ void tx_ctune() noexcept
     RfEnd::r32(off::Control) &= ~0x100u;
     RfEnd::r32(off::TxBias) &= ~0x1000u;
     RfEnd::r32(off::TxControl) &= ~0x10u;
-    RfEnd::r32(off::Control2) |= 0x00200000u;
+    RfEnd::r32(off::Control2) |= 0x00020000u;
     RfEnd::r32(off::Control) |= 0x10u;
 
     if (g_ftune_flag != 0x1234u)

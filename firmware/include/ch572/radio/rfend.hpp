@@ -10,6 +10,8 @@ void calibration() noexcept;
 void tx_ctune() noexcept;
 void tx_ftune() noexcept;
 void rx_filter() noexcept;
+bool rx_filter_timed_out() noexcept;
+std::uint32_t timer_probe() noexcept;
 void rx_adc() noexcept;
 void wait_tune(std::uint16_t cycles) noexcept;
 

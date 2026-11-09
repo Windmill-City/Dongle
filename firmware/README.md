@@ -19,7 +19,8 @@
 ```text
 firmware/
 ├─ Makefile
-├─ ld/ch572.ld
+├─ ld/ch572_app.ld     应用链接脚本（0x2000 起始）
+├─ ld/ch572_iap.ld     引导程序链接脚本（0x0 起始）
 ├─ include/ch572/
 │  ├─ config.hpp
 │  ├─ platform/       寄存器、中断、时钟、GPIO、SysTick
@@ -73,18 +74,9 @@ C:/MounRiver/MounRiver_Studio3/resources/app/resources/win32/components/WCH/Tool
 
 ```sh
 cd firmware
-make
-make size
+make            # 应用：build/app/rf_uart_dongle_iap.hex
+make iap_boot   # 引导程序：build/boot/rf_uart_iap.hex
 make clean
-```
-
-输出：
-
-```text
-build/rf_uart_dongle.elf
-build/rf_uart_dongle.hex
-build/rf_uart_dongle.bin
-build/rf_uart_dongle.map
 ```
 
 ## 关于 RF 前端
@@ -111,7 +103,8 @@ build/rf_uart_dongle.map
 
 ## 烧录
 
-使用 `build/rf_uart_dongle.hex`。
+应用使用 `build/app/rf_uart_dongle_iap.bin`（经 USB IAP 刷入）；引导程序使用
+`build/boot/rf_uart_iap.hex`（首次用 SWD 刷入一次）。
 
 ### 串口 ISP
 

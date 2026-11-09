@@ -151,13 +151,65 @@ inline volatile std::uint8_t &flash_sck() noexcept
 {
     return *reinterpret_cast<volatile std::uint8_t *>(0x40001805u);
 }
+inline volatile std::uint32_t &misc_ctrl() noexcept
+{
+    return *reinterpret_cast<volatile std::uint32_t *>(0x40001048u);
+}
+inline volatile std::uint8_t &sleep_clk_off1() noexcept
+{
+    return *reinterpret_cast<volatile std::uint8_t *>(0x4000100Du);
+}
+inline volatile std::uint8_t &sleep_clk_off2() noexcept
+{
+    return *reinterpret_cast<volatile std::uint8_t *>(0x4000101Du);
+}
 inline volatile std::uint8_t &reset_watchdog_ctrl() noexcept
 {
     return *reinterpret_cast<volatile std::uint8_t *>(0x40001046u);
 }
+inline volatile std::uint8_t &watchdog_count() noexcept
+{
+    return *reinterpret_cast<volatile std::uint8_t *>(0x40001043u);
+}
+// Independent watchdog (IWDT): runs from the 32 kHz LSI, 4..512 prescaler,
+// 12-bit reload.  timeout = prescaler * reload / 32768 s.
+// The R8_WDOG_COUNT above counts at Fsys/131072 (8-bit), so at 100 MHz it can
+// only reach ~0.33 s; use the IWDT whenever a longer timeout is needed.
+inline volatile std::uint32_t &iwdg_key() noexcept
+{
+    return *reinterpret_cast<volatile std::uint32_t *>(0x40001000u);
+}
+inline volatile std::uint32_t &iwdg_cfg() noexcept
+{
+    return *reinterpret_cast<volatile std::uint32_t *>(0x40001004u);
+}
+inline void iwdg_feed() noexcept
+{
+    iwdg_key() = 0xAAAAu; // KEY_RELOADING_COUNT
+}
+inline void iwdg_start_5s() noexcept
+{
+    iwdg_key() = 0xCCCCu; // KEY_START_IWDG
+    iwdg_key() = 0x5555u; // KEY_UNPROTECT (allow PR/RLR writes)
+    // PR field bits 11..13: 4 -> /64.
+    iwdg_cfg() = (iwdg_cfg() & ~(0x7u << 11)) | (4u << 11);
+    for (std::uint32_t guard = 0; guard < 100000u && (iwdg_cfg() & (1u << 15)) != 0u; ++guard)
+    {
+    }
+    // RLR field bits 16..27: 64 * 2560 / 32768 = 5.0 s.
+    iwdg_cfg() = (iwdg_cfg() & ~(0xFFFu << 16)) | (2560u << 16);
+    for (std::uint32_t guard = 0; guard < 100000u && (iwdg_cfg() & (1u << 15)) != 0u; ++guard)
+    {
+    }
+    iwdg_key() = 0xAAAAu; // load the new timeout
+}
 inline volatile std::uint16_t &pin_alternate() noexcept
 {
     return *reinterpret_cast<volatile std::uint16_t *>(0x40001018u);
+}
+inline volatile std::uint16_t &pin_alternate_high() noexcept
+{
+    return *reinterpret_cast<volatile std::uint16_t *>(0x4000101Au);
 }
 
 inline constexpr std::uint8_t kSafeAccessSig1 = 0x57;
@@ -165,6 +217,8 @@ inline constexpr std::uint8_t kSafeAccessSig2 = 0xA8;
 inline constexpr std::uint8_t kClockPllOn = 0x10;
 inline constexpr std::uint8_t kClockXt32mOn = 0x04;
 inline constexpr std::uint16_t kPinDebugEnable = 0x4000;
+inline constexpr std::uint16_t kPinUsbEnable = 0x2000;
+inline constexpr std::uint16_t kUdpPullUpEnable = 0x1000;
 inline constexpr std::uint8_t kSoftwareReset = 0x01;
 
 class SafeAccess
@@ -292,10 +346,16 @@ inline constexpr std::uint8_t kUifTransfer = 0x02;
 inline constexpr std::uint8_t kUifBusReset = 0x01;
 inline constexpr std::uint8_t kUifSuspend = 0x04;
 inline constexpr std::uint8_t kUisSetupAct = 0x80;
+inline constexpr std::uint8_t kUisTogOk = 0x40;
 inline constexpr std::uint8_t kMaskUisToken = 0x30;
+inline constexpr std::uint8_t kMaskUisEndp = 0x0F;
 inline constexpr std::uint8_t kUisTokenOut = 0x00;
 inline constexpr std::uint8_t kUisTokenIn = 0x20;
 inline constexpr std::uint8_t kUisTokenSetup = 0x30;
+inline constexpr std::uint8_t kUifNak = 0x80;
+inline constexpr std::uint8_t kUcResetSie = 0x04;
+inline constexpr std::uint8_t kUdaGpBit = 0x80;
+inline constexpr std::uint8_t kUepAutoTog = 0x10;
 inline constexpr std::uint8_t kUep1RxEn = 0x80;
 inline constexpr std::uint8_t kUep1TxEn = 0x40;
 inline constexpr std::uint8_t kUep2RxEn = 0x08;

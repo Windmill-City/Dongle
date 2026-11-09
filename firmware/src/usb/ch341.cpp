@@ -81,6 +81,14 @@ void Ch341Serial::init()
     device_parameters_init();
     vendor_init();
     enable_irq(Irq::Usb);
+
+    // WCH implements the global interrupt enable in the custom CSR 0x800
+    // (PFIC_EnableAllIRQ writes 0x800 = 0x88); mstatus alone does not gate
+    // PFIC interrupts. Without this the USB interrupt never fires, the setup
+    // packet is only handled by the slow flash-resident poll loop, and the
+    // host reports a device-descriptor failure.
+    const std::uint32_t kGlobalIrqEnable = 0x88u;
+    asm volatile("csrw 0x800, %0" : : "r"(kGlobalIrqEnable) : "memory");
 }
 
 void Ch341Serial::vendor_init()
@@ -93,13 +101,17 @@ void Ch341Serial::vendor_init()
     usbreg::ep1_dma() = static_cast<std::uint16_t>(reinterpret_cast<std::uintptr_t>(&m_ep1_buffer[0]));
     usbreg::ep2_dma() = static_cast<std::uint16_t>(reinterpret_cast<std::uintptr_t>(&m_ep2_buffer[0]));
 
-    usbreg::ep0_ctrl() = usbreg::kUepRResNak | usbreg::kUepTResNak;
+    // EP0 must receive (ACK) so the host's first SETUP (GET_DESCRIPTOR) is
+    // accepted. With RX=NAK the packet is rejected and enumeration never
+    // starts.
+    usbreg::ep0_ctrl() = usbreg::kUepRResAck | usbreg::kUepTResNak;
     usbreg::ep1_ctrl() = usbreg::kUepRResAck | usbreg::kUepTResNak;
     usbreg::ep2_ctrl() = usbreg::kUepRResAck | usbreg::kUepTResNak;
 
     usbreg::dev_addr() = 0;
     usbreg::dev_ctrl() = usbreg::kUdPdDis;
     usbreg::ctrl() = usbreg::kUcDevPuEn | usbreg::kUcIntBusy | usbreg::kUcDmaEn;
+    sysreg::pin_alternate() |= sysreg::kPinUsbEnable | sysreg::kUdpPullUpEnable;
     usbreg::int_fg() = 0xFF;
     usbreg::int_en() = usbreg::kUieSuspend | usbreg::kUieTransfer | usbreg::kUieBusReset;
 
@@ -130,7 +142,7 @@ void Ch341Serial::device_parameters_init()
     }
 }
 
-void Ch341Serial::handle_setup(std::uint8_t length)
+CH572_HIGH_CODE void Ch341Serial::handle_setup(std::uint8_t length)
 {
     auto *setup = reinterpret_cast<SetupRequest *>(m_ep0_buffer);
     std::uint8_t response[8];
@@ -462,6 +474,25 @@ void Ch341Serial::irq_handler()
                     usbreg::ep2_ctrl() ^= usbreg::kUepRTog;
                     const std::size_t data_length = m_irq_length[m_irq_write_index];
                     m_rx_buffer.write(m_ep2_buffer, data_length);
+
+                    static constexpr std::uint8_t kIapMagic[] = {0x55, 0xAA, 0x49, 0x41, 0x50};
+                    for (std::size_t i = 0; i < data_length; ++i)
+                    {
+                        const std::uint8_t value = m_ep2_buffer[i];
+                        if (value == kIapMagic[m_iap_match])
+                        {
+                            ++m_iap_match;
+                            if (m_iap_match == sizeof(kIapMagic))
+                            {
+                                m_iap_match = 0;
+                                m_iap_request = true;
+                            }
+                        }
+                        else
+                        {
+                            m_iap_match = (value == kIapMagic[0]) ? 1u : 0u;
+                        }
+                    }
                     if (m_rx_buffer.size() > (kUsbBufferSize - kPacketSize))
                     {
                         usbreg::ep2_ctrl() = (usbreg::ep2_ctrl() & ~usbreg::kMaskUepRRes) | usbreg::kUepRResNak;
@@ -524,16 +555,19 @@ void Ch341Serial::irq_handler()
 
         if ((usbreg::int_st() & usbreg::kUisSetupAct) != 0)
         {
-            m_irq_pending[m_irq_write_index] = 1;
-            m_irq_pid[m_irq_write_index] = kTransferSetup | 0;
-            m_irq_length[m_irq_write_index] = 8;
-            m_irq_write_index = static_cast<std::uint8_t>((m_irq_write_index + 1) % kIrqQueueDepth);
+            // Handle the setup packet immediately in the ISR. Deferring it to
+            // poll() (which runs from flash) delays the descriptor reply past
+            // the host's enumeration timeout.
+            handle_setup(8);
             usbreg::int_fg() = usbreg::kUifTransfer;
         }
     }
     else if ((usbreg::int_fg() & usbreg::kUifBusReset) != 0)
     {
-        usbreg::ep0_ctrl() = usbreg::kUepRResNak | usbreg::kUepTResNak;
+        // After a bus reset EP0 must be ready to receive the host's SETUP
+        // (ACK), otherwise the first GET_DESCRIPTOR is NAKed and enumeration
+        // never starts. This matches the working IAP bootloader.
+        usbreg::ep0_ctrl() = usbreg::kUepRResAck | usbreg::kUepTResNak;
         usbreg::ep1_ctrl() = usbreg::kUepRResAck | usbreg::kUepTResNak;
         usbreg::ep2_ctrl() = usbreg::kUepRResAck | usbreg::kUepTResNak;
         usbreg::dev_addr() = 0;
@@ -546,7 +580,7 @@ void Ch341Serial::irq_handler()
     }
 }
 
-void Ch341Serial::process_irq()
+CH572_HIGH_CODE void Ch341Serial::process_irq()
 {
     const std::uint8_t index = m_irq_read_index;
     m_irq_read_index = static_cast<std::uint8_t>((m_irq_read_index + 1) % kIrqQueueDepth);
@@ -638,7 +672,7 @@ void Ch341Serial::process_irq()
     }
 }
 
-void Ch341Serial::poll()
+CH572_HIGH_CODE void Ch341Serial::poll()
 {
     const std::uint8_t index = m_irq_read_index;
     if (m_irq_pending[index] != 0)

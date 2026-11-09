@@ -2,6 +2,7 @@
 
 MRS_TOOLCHAIN ?= C:/MounRiver/MounRiver_Studio3/resources/app/resources/win32/components/WCH/Toolchain/RISC-V Embedded GCC15/bin
 PREFIX        := $(MRS_TOOLCHAIN)/riscv32-wch-elf-
+CC            := "$(PREFIX)gcc.exe"
 CXX           := "$(PREFIX)g++.exe"
 OBJCOPY       := "$(PREFIX)objcopy.exe"
 SIZE          := "$(PREFIX)size.exe"
@@ -16,22 +17,40 @@ CXXFLAGS      := $(ARCH) -Os -std=c++17 \
                  -fno-common -fsigned-char -fmessage-length=0 \
                  -Wall -Wextra
 ASFLAGS       := $(ARCH) -x assembler-with-cpp
-INCLUDES      := -Iinclude
+CFLAGS        := $(ARCH) -Os -ffunction-sections -fdata-sections -fno-common \
+                 -Wall -Wextra -std=gnu11
+INCLUDES      := -Iinclude -Isdk/StdPeriphDriver/inc -Isdk/RVMSIS
 
-LDSCRIPT      := ld/ch572.ld
+COMMON_CXX    := src/platform/gpio.cpp src/platform/clock.cpp \
+                 src/platform/fault.cpp src/platform/iap_flag.cpp
+APP_CXX       := src/main.cpp src/platform/systick.cpp \
+                 src/platform/led_diagnostic.cpp src/hal/led.cpp \
+                 src/hal/uart.cpp src/usb/ch341.cpp src/usb/descriptors.cpp \
+                 src/radio/rfip.cpp src/radio/rf_uart.cpp src/radio/rfend.cpp
+IAP_CXX       := src/boot/iap_main.cpp src/usb/isp.cpp src/platform/systick.cpp
+
+ifdef IAP_BOOT
+CXX_SOURCES   := $(COMMON_CXX) $(IAP_CXX) src/platform/flash.cpp
+C_SOURCES     := sdk/StdPeriphDriver/CH57x_flash.c
+LIBS          := -Wl,--start-group -lm sdk/StdPeriphDriver/libISP572.a -Wl,--end-group
+LDSCRIPT      := ld/ch572_iap.ld
+else ifdef APP_IAP
+CXX_SOURCES   := $(COMMON_CXX) $(APP_CXX) src/platform/flash.cpp
+C_SOURCES     := sdk/StdPeriphDriver/CH57x_flash.c
+LIBS          := -Wl,--start-group -lm sdk/StdPeriphDriver/libISP572.a -Wl,--end-group
+LDSCRIPT      := ld/ch572_app.ld
+endif
+
+ASM_SOURCES   := src/boot/startup_ch572.S
+OBJECTS       := $(patsubst %.cpp,$(BUILD)/%.o,$(CXX_SOURCES)) \
+                 $(patsubst %.S,$(BUILD)/%.o,$(ASM_SOURCES)) \
+                 $(patsubst %.c,$(BUILD)/%.o,$(C_SOURCES))
+DEPS          := $(OBJECTS:.o=.d)
+
 LDFLAGS       := $(ARCH) -T$(LDSCRIPT) -nostartfiles \
                  -Wl,--gc-sections -Wl,--print-memory-usage \
                  -Wl,-Map=$(BUILD)/$(TARGET).map \
                  --specs=nano.specs --specs=nosys.specs
-
-SRC_DIRS      := src src/platform src/hal src/usb src/radio
-CXX_SOURCES   := $(foreach dir,$(SRC_DIRS),$(wildcard $(dir)/*.cpp))
-ASM_SOURCES   := $(wildcard src/boot/*.S)
-OBJECTS       := $(patsubst %.cpp,$(BUILD)/%.o,$(CXX_SOURCES)) \
-                 $(patsubst %.S,$(BUILD)/%.o,$(ASM_SOURCES))
-DEPS          := $(OBJECTS:.o=.d)
-
-LIBS          := -Wl,--start-group -lm -Wl,--end-group
 
 ifeq ($(OS),Windows_NT)
 SHELL         := cmd.exe
@@ -42,9 +61,20 @@ MKDIR_P        = mkdir -p "$(1)"
 RM_RF          = rm -rf "$(1)"
 endif
 
-.PHONY: all clean size help
+.PHONY: all build clean help iap_app iap_boot
 
-all: $(BUILD)/$(TARGET).hex
+# `make` (default) builds the application; `make iap_boot` builds the bootloader.
+# Each driver target re-invokes make with the flags its build needs and runs the
+# `build` rule, so the default target never recurses into itself.
+all: iap_app
+
+iap_app:
+	$(MAKE) BUILD=build/app TARGET=rf_uart_dongle_iap APP_IAP=1 CXXFLAGS="$(CXXFLAGS) -DAPP_IAP" build
+
+iap_boot:
+	$(MAKE) BUILD=build/boot TARGET=rf_uart_iap IAP_BOOT=1 CXXFLAGS="$(CXXFLAGS) -DIAP_BOOT" build
+
+build: $(BUILD)/$(TARGET).hex
 
 $(BUILD)/$(TARGET).elf: $(OBJECTS)
 	$(CXX) $(LDFLAGS) -o $@ $(OBJECTS) $(LIBS)
@@ -63,15 +93,17 @@ $(BUILD)/%.o: %.S
 	@$(call MKDIR_P,$(dir $@))
 	$(CXX) $(ASFLAGS) $(INCLUDES) -c $< -o $@
 
-size: $(BUILD)/$(TARGET).elf
-	$(SIZE) $<
+$(BUILD)/%.o: %.c
+	@$(call MKDIR_P,$(dir $@))
+	$(CC) $(CFLAGS) $(INCLUDES) -MMD -MP -c $< -o $@
 
 clean:
-	@$(call RM_RF,$(BUILD))
+	@$(call RM_RF,build)
 
 help:
-	@echo "make        build the firmware"
-	@echo "make clean  remove build outputs"
-	@echo "make size   show section sizes"
+	@echo "make             build the application (same as make iap_app)"
+	@echo "make iap_app     application image for the USB IAP bootloader"
+	@echo "make iap_boot    release bootloader: auto-jumps to the app unless the app requested IAP"
+	@echo "make clean       remove build outputs"
 
 -include $(DEPS)

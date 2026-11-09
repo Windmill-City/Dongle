@@ -61,6 +61,8 @@ void init_100mhz() noexcept
         sysreg::SafeAccess access;
         sysreg::sleep_power_ctrl() |= kPowerPlanEnable;
         sysreg::clock_sys_cfg() = kPll100MHz;
+        // CH570Q SetSysClock(): 7,7 trims (check the CH572 SDK value separately).
+        sysreg::misc_ctrl() |= (7u << 3) | (7u << 6);
     }
 }
 
