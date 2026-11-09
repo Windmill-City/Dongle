@@ -1,12 +1,13 @@
 #include <cstdint>
 
 #include "ch572/boot/iap_flag.hpp"
+#include "ch572/boot/iap_update.hpp"
 #include "ch572/config.hpp"
 #include "ch572/platform/clock.hpp"
 #include "ch572/platform/gpio.hpp"
 #include "ch572/platform/registers.hpp"
 #include "ch572/platform/systick.hpp"
-#include "ch572/usb/isp.hpp"
+#include "ch572/usb/ch341.hpp"
 
 namespace {
 
@@ -17,14 +18,19 @@ using ch572::gpio::Pin;
 constexpr std::uint32_t kDebugJumpAddress = 0x20002F00u;
 constexpr std::uint32_t kDebugJumpMagic = 0x5AA55AA5u;
 
-void blink(int count) noexcept
+[[noreturn]] void jump_to_app() noexcept
 {
-    for (int i = 0; i < count; ++i)
+    ch572::usbreg::ctrl() = ch572::usbreg::kUcResetSie;
+    ch572::sysreg::pin_alternate() &=
+        ~(ch572::sysreg::kPinUsbEnable | ch572::sysreg::kUdpPullUpEnable);
+
+    // Give the host time to notice the disconnect before handing over.
+    ch572::systick::delay_ms(10u);
+
+    using Entry = void (*)();
+    reinterpret_cast<Entry>(ch572::kAppStart)();
+    for (;;)
     {
-        ch572::gpio::set(Pin::p7);
-        ch572::systick::delay_ms(20u);
-        ch572::gpio::clear(Pin::p7);
-        ch572::systick::delay_ms(20u);
     }
 }
 
@@ -50,66 +56,41 @@ int main()
         if (*jump_request == kDebugJumpMagic)
         {
             *jump_request = 0;
-            usb::IspDevice::jump_to_app();
+            jump_to_app();
         }
         gpio::set(Pin::p7);
         systick::delay_ms(100u);
         gpio::clear(Pin::p7);
         systick::delay_ms(100u);
     }
-#endif
-
+#else
     systick::start(6400u); // reset-default 6.4 MHz
 
+    // Boot the application unless it asked to stay in the bootloader (either
+    // because it failed to confirm startup or because the host requested an
+    // application upgrade through the vendor control request).
     if (!iap::requested())
     {
         iap::request();
-        usb::IspDevice::jump_to_app();
+        jump_to_app();
     }
 
-    gpio::clear(Pin::p7);
-    gpio::configure(Pin::p7, gpio::Mode::output_push_pull_5ma);
-
-    // IAP mode: switch to 100 MHz and take over the USB pins.
+    // Application upgrade mode: expose the same framed serial protocol the
+    // application uses to rewrite the boot region, but target the application
+    // region. The bootloader itself is never erased here.
     clock::set_hse_capacitance(clock::HseCapacitance::p8);
     clock::init_100mhz();
     systick::start(100000u); // 100 MHz
     sysreg::pin_alternate() &= ~sysreg::kPinDebugEnable;
 
-    // Stage 2: two blinks mean the 100 MHz clock init returned.
-    blink(2);
-    gpio::set(Pin::p7);
-
-    auto &isp = usb::IspDevice::instance();
-    isp.init();
-
-    // Stage 3: three blinks mean USB ISP init returned.
-    blink(3);
-
-    // Once the application has requested an upgrade, stay in the ISP until the
-    // host finishes with the End command; only a reset can leave earlier.
-    constexpr std::uint32_t kHeartbeatTicks = 500u; // 500 ms
-    std::uint32_t heartbeat = 0;
-    bool led_on = false;
-
-    for (;;)
+    auto &usb = usb::Ch341Serial::instance();
+    usb.init();
+    while (!usb.enumerated())
     {
-        isp.poll();
-
-        if (++heartbeat >= kHeartbeatTicks)
-        {
-            heartbeat = 0;
-            led_on = !led_on;
-            if (led_on)
-            {
-                gpio::set(Pin::p7);
-            }
-            else
-            {
-                gpio::clear(Pin::p7);
-            }
-        }
-
-        systick::delay_ms(1u);
+        usb.poll();
     }
+
+    sysreg::iwdg_start_5s();
+    iap::update_region(usb, kAppStart, kAppEnd);
+#endif
 }

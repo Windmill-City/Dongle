@@ -15,15 +15,15 @@ constexpr std::uint8_t kRequestUartInit = 0xA1;
 constexpr std::uint8_t kRequestUartModemOut = 0xA4;
 constexpr std::uint8_t kRequestGetVersion = 0x5F;
 
-// Out-of-band IAP control. A vendor control request cannot collide with the
-// transparent RF data stream, so no byte pattern in the payload can trigger a
-// jump or a bootloader update.
+// Out-of-band upgrade control. A vendor control request cannot collide with
+// the transparent RF data stream, so no byte pattern in the payload can enter
+// an upgrade mode. Data itself uses the normal CH341 serial endpoint.
 constexpr std::uint8_t kRequestIapControl = 0xB1;
 constexpr std::uint8_t kIapMarker = 0x5A;
 constexpr std::uint8_t kIapTokenLow = 0x41;
 constexpr std::uint8_t kIapTokenHigh = 0x49;
-constexpr std::uint8_t kIapCommandJump = 0x01;
-constexpr std::uint8_t kIapCommandBoot = 0x02;
+constexpr std::uint8_t kIapCommandAppUpdate = 0x01;
+constexpr std::uint8_t kIapCommandBootUpdate = 0x02;
 
 constexpr std::uint8_t kClassSetLineCoding = 0x20;
 constexpr std::uint8_t kClassGetLineCoding = 0x21;
@@ -54,8 +54,8 @@ Ch341Serial &Ch341Serial::instance()
 void Ch341Serial::init()
 {
     sysreg::pin_alternate() &= ~sysreg::kPinDebugEnable;
-    m_iap_request = false;
-    m_iap_update_request = false;
+    m_app_update_request = false;
+    m_boot_update_request = false;
     device_parameters_init();
     vendor_init();
     enable_irq(Irq::Usb);
@@ -208,7 +208,7 @@ void Ch341Serial::handle_setup()
         case kRequestIapControl:
         {
             // bmRequestType = 0x40 (vendor, host-to-device, device).
-            // wValue = 0x5A01 (jump to IAP) or 0x5A02 (bootloader update).
+            // wValue = 0x5A01 (app update) or 0x5A02 (boot region update).
             // wIndex = 0x4941 acts as a token so stray vendor requests from a
             // generic driver cannot arm the device.
             const bool valid = data_direction == 0 && setup->length_l == 0 &&
@@ -216,13 +216,13 @@ void Ch341Serial::handle_setup()
                                setup->value_h == kIapMarker &&
                                setup->index_l == kIapTokenLow &&
                                setup->index_h == kIapTokenHigh;
-            if (valid && setup->value_l == kIapCommandJump)
+            if (valid && setup->value_l == kIapCommandAppUpdate)
             {
-                m_iap_request = true;
+                m_app_update_request = true;
             }
-            else if (valid && setup->value_l == kIapCommandBoot)
+            else if (valid && setup->value_l == kIapCommandBootUpdate)
             {
-                m_iap_update_request = true;
+                m_boot_update_request = true;
             }
             break;
         }

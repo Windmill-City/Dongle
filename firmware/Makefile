@@ -7,7 +7,7 @@ CXX           := "$(PREFIX)g++.exe"
 OBJCOPY       := "$(PREFIX)objcopy.exe"
 SIZE          := "$(PREFIX)size.exe"
 
-TARGET        := rf_uart_dongle
+TARGET        := rf_uart_app
 BUILD         := build
 
 ARCH          := -march=rv32imcb -mabi=ilp32 -mcmodel=medany
@@ -28,7 +28,8 @@ APP_CXX       := src/main.cpp src/platform/systick.cpp \
                  src/hal/led.cpp \
                  src/usb/ch341.cpp \
                  src/radio/rfip.cpp src/radio/rf_uart.cpp src/radio/rfend.cpp
-IAP_CXX       := src/boot/iap_main.cpp src/usb/isp.cpp src/platform/systick.cpp
+IAP_CXX       := src/boot/iap_main.cpp src/boot/iap_update.cpp \
+                 src/usb/ch341.cpp src/platform/systick.cpp
 
 ifdef IAP_BOOT
 CXX_SOURCES   := $(COMMON_CXX) $(IAP_CXX) src/platform/flash.cpp
@@ -68,7 +69,7 @@ endif
 all: iap_app
 
 iap_app:
-	$(MAKE) BUILD=build/app TARGET=rf_uart_dongle_iap build
+	$(MAKE) BUILD=build/app TARGET=rf_uart_app build
 
 iap_boot:
 	$(MAKE) BUILD=build/boot TARGET=rf_uart_iap IAP_BOOT=1 CXXFLAGS="$(CXXFLAGS) -DIAP_BOOT" build

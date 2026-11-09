@@ -2,6 +2,7 @@
 
 #include <cstdint>
 
+#include "ch572/boot/iap_flag.hpp"
 #include "ch572/config.hpp"
 #include "ch572/platform/flash.hpp"
 #include "ch572/platform/registers.hpp"
@@ -16,7 +17,7 @@ namespace {
 //   host -> device:  A5 | CMD | LEN_LO LEN_HI | PAYLOAD[LEN] | XOR
 //   device -> host:  1 status byte
 //
-// XOR covers CMD, LEN_LO, LEN_HI and the payload. After the trigger magic the
+// XOR covers CMD, LEN_LO, LEN_HI and the payload. After the trigger the
 // application sends kReady once; the host must wait for it before streaming
 // frames, which keeps the trigger bytes out of the frame parser.
 constexpr std::uint8_t kSof = 0xA5u;
@@ -81,36 +82,63 @@ std::uint32_t crc32(const std::uint8_t *data, std::uint32_t length) noexcept
 [[noreturn]] void finish(usb::Ch341Serial &usb) noexcept
 {
     // Give the host a moment to read the final status byte before the reset
-    // disconnects the USB device.
+    // disconnects the USB device. The application is valid at this point (the
+    // boot region update keeps it, the app update just wrote a CRC-checked
+    // image), so confirm it to the bootloader and reboot.
     for (int i = 0; i < 200; ++i)
     {
         usb.poll();
         sysreg::iwdg_feed();
         systick::delay_ms(1u);
     }
+    app_ok();
     sysreg::software_reset();
+}
+
+struct Session
+{
+    std::uint32_t start;
+    std::uint32_t end;
+    std::uint32_t erase_end;
+    bool erased;
+};
+
+bool in_data_range(const Session &session, std::uint32_t address,
+                   std::uint32_t length) noexcept
+{
+    return address >= session.start && address <= session.erase_end &&
+           length <= session.erase_end - address;
 }
 
 void handle_command(usb::Ch341Serial &usb, ResponseSource &out, std::uint8_t command,
                     const std::uint8_t *payload, std::uint16_t length,
-                    bool &erased) noexcept
+                    Session &session) noexcept
 {
     switch (command)
     {
     case kCmdErase:
-        if (length != 0u)
+    {
+        if (length != 4u)
         {
             out.push(kStatusFrame);
             return;
         }
-        if (!flash::erase(kIapStart, kIapEnd - kIapStart))
+        const std::uint32_t image_length = read_le32(payload);
+        if (image_length == 0u || image_length > session.end - session.start)
+        {
+            out.push(kStatusRange);
+            return;
+        }
+        if (!flash::erase(session.start, image_length))
         {
             out.push(kStatusFlash);
             return;
         }
-        erased = true;
+        session.erase_end = session.start + image_length;
+        session.erased = true;
         out.push(kStatusOk);
         return;
+    }
 
     case kCmdData:
     {
@@ -121,14 +149,13 @@ void handle_command(usb::Ch341Serial &usb, ResponseSource &out, std::uint8_t com
         }
         const std::uint32_t address = read_le32(payload);
         const std::uint32_t data_length = static_cast<std::uint32_t>(length) - 4u;
-        if (!erased)
+        if (!session.erased)
         {
             out.push(kStatusNotErased);
             return;
         }
         if (data_length == 0u || (address & 0x3u) != 0u ||
-            (data_length & 0x3u) != 0u || address < kIapStart ||
-            address > kIapEnd || data_length > kIapEnd - address)
+            (data_length & 0x3u) != 0u || !in_data_range(session, address, data_length))
         {
             out.push(kStatusRange);
             return;
@@ -147,14 +174,18 @@ void handle_command(usb::Ch341Serial &usb, ResponseSource &out, std::uint8_t com
         }
         const std::uint32_t address = read_le32(payload);
         const std::uint32_t data_length = static_cast<std::uint32_t>(length) - 4u;
-        if ((address & 0x3u) != 0u || address < kIapStart ||
-            address > kIapEnd || data_length > kIapEnd - address)
+        if (!session.erased)
+        {
+            out.push(kStatusNotErased);
+            return;
+        }
+        if ((address & 0x3u) != 0u || !in_data_range(session, address, data_length))
         {
             out.push(kStatusRange);
             return;
         }
         out.push(flash::verify(address, payload + 4, data_length) ? kStatusOk
-                                                                  : kStatusFlash);
+                                                                 : kStatusFlash);
         return;
     }
 
@@ -165,10 +196,14 @@ void handle_command(usb::Ch341Serial &usb, ResponseSource &out, std::uint8_t com
             out.push(kStatusFrame);
             return;
         }
-        const auto *image =
-            reinterpret_cast<const std::uint8_t *>(
-                static_cast<std::uintptr_t>(kIapStart));
-        const std::uint32_t actual = crc32(image, kIapEnd - kIapStart);
+        if (!session.erased)
+        {
+            out.push(kStatusNotErased);
+            return;
+        }
+        const auto *image = reinterpret_cast<const std::uint8_t *>(
+            static_cast<std::uintptr_t>(session.start));
+        const std::uint32_t actual = crc32(image, session.erase_end - session.start);
         if (actual != read_le32(payload))
         {
             out.push(kStatusCrc);
@@ -179,8 +214,8 @@ void handle_command(usb::Ch341Serial &usb, ResponseSource &out, std::uint8_t com
     }
 
     case kCmdAbort:
-        // Only safe while the old bootloader is still intact.
-        if (!erased)
+        // Only safe while the target region is still intact.
+        if (!session.erased)
         {
             out.push(kStatusOk);
             finish(usb);
@@ -216,7 +251,7 @@ struct Receiver
     std::uint8_t payload[kMaxPayload]{};
 
     void feed(usb::Ch341Serial &usb, ResponseSource &out, std::uint8_t value,
-              bool &erased) noexcept
+              Session &session) noexcept
     {
         switch (state)
         {
@@ -267,7 +302,7 @@ struct Receiver
         case State::checksum:
             if (value == checksum)
             {
-                handle_command(usb, out, command, payload, length, erased);
+                handle_command(usb, out, command, payload, length, session);
             }
             else
             {
@@ -289,12 +324,12 @@ struct Receiver
 
 } // namespace
 
-void update_iap_region(usb::Ch341Serial &usb) noexcept
+void update_region(usb::Ch341Serial &usb, std::uint32_t start, std::uint32_t end) noexcept
 {
     static ResponseSource source;
     usb.set_source(&source);
 
-    // Drop the trigger magic and anything else buffered before the handshake.
+    // Drop the trigger and anything else buffered before the handshake.
     std::uint8_t scratch[32];
     for (;;)
     {
@@ -312,7 +347,7 @@ void update_iap_region(usb::Ch341Serial &usb) noexcept
     source.push(kReady);
 
     Receiver receiver;
-    bool erased = false;
+    Session session{start, end, start, false};
 
     for (;;)
     {
@@ -325,7 +360,7 @@ void update_iap_region(usb::Ch341Serial &usb) noexcept
         {
             for (std::size_t i = 0; i < result.length; ++i)
             {
-                receiver.feed(usb, source, chunk[i], erased);
+                receiver.feed(usb, source, chunk[i], session);
             }
         }
     }

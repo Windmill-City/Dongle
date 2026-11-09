@@ -252,7 +252,7 @@ inline void disable_watchdog_reset() noexcept
 }
 
 // Trigger a software reset without touching the SRAM IAP request flag, so the
-// bootloader boots normally instead of entering ISP.
+// bootloader still sees the caller's application/upgrade decision.
 [[noreturn]] inline void software_reset() noexcept
 {
     SafeAccess access;

@@ -2,6 +2,7 @@
 
 #include "ch572/boot/iap_flag.hpp"
 #include "ch572/boot/iap_update.hpp"
+#include "ch572/config.hpp"
 #include "ch572/hal/led.hpp"
 #include "ch572/platform/clock.hpp"
 #include "ch572/platform/registers.hpp"
@@ -54,17 +55,19 @@ int main()
         usb.poll();
         sysreg::iwdg_feed();
 
-        if (usb.iap_requested())
+        if (usb.app_update_requested())
         {
+            // App upgrade: reset into the bootloader, which serves the same
+            // framed serial protocol for the application region.
             iap::jump();
         }
 
-        if (usb.iap_update_requested())
+        if (usb.boot_update_requested())
         {
             rf::shutdown();
             disable_irq(Irq::BleBb);
             disable_irq(Irq::BleLle);
-            iap::update_iap_region(usb);
+            iap::update_region(usb, kIapStart, kIapEnd);
         }
 
         const std::uint32_t now = systick::now();

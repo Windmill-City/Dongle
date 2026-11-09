@@ -44,8 +44,8 @@ public:
     CH572_HIGH_CODE HostReadResult read_host(void *dst, std::size_t max_length);
     const LineCoding &line_coding() const noexcept { return m_line_coding; }
     bool enumerated() const noexcept { return (usbreg::dev_addr() & 0x7Fu) != 0; }
-    bool iap_requested() const noexcept { return m_iap_request; }
-    bool iap_update_requested() const noexcept { return m_iap_update_request; }
+    bool app_update_requested() const noexcept { return m_app_update_request; }
+    bool boot_update_requested() const noexcept { return m_boot_update_request; }
 
 private:
     Ch341Serial() = default;
@@ -90,8 +90,8 @@ private:
 
     RingBuffer<kUsbBufferSize> m_rx_buffer;
     ByteSource *m_source = nullptr;
-    volatile bool m_iap_request = false;
-    volatile bool m_iap_update_request = false;
+    volatile bool m_app_update_request = false;
+    volatile bool m_boot_update_request = false;
 };
 
 } // namespace ch572::usb

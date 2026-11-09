@@ -13,10 +13,11 @@
   与单调递增的 `sequence`。
 - 板载 LED：USB 未枚举时 500 ms 闪烁，枚举成功后常亮。
 - 100 MHz 系统时钟（32 MHz HSE + PLL）。
-- 支持 USB IAP 升级：应用通过 USB 厂商控制请求主动进入引导程序；普通串口
-  数据不再触发升级。
-- 支持在应用运行中通过 USB 直接重写 `0x0000–0x1FFF` 的 IAP 引导程序
-  （带整区 CRC 校验），同样使用厂商控制请求进入更新模式。
+- 支持运行中升级：应用通过 USB 厂商控制请求（EP0）进入升级模式，数据走
+  现有 CH341 串口；普通串口数据不会触发升级。
+- 升级应用：应用软复位进入引导程序，由引导程序用同一套帧协议重写
+  `0x2000` 之后的应用区。
+- 升级 IAP 引导程序：应用运行中直接重写 `0x0000–0x1FFF`，带整区 CRC 校验。
 
 ## 目录结构
 
@@ -29,18 +30,18 @@ firmware/
 │  ├─ config.hpp
 │  ├─ platform/       寄存器、中断、时钟、GPIO、SysTick、Flash
 │  ├─ hal/            LED
-│  ├─ usb/            USB 设备、CH341 兼容层、ISP、描述符
+│  ├─ usb/            USB 设备、CH341 兼容层、描述符
 │  ├─ radio/          RFIP/RFRole、RFEND 校准、RF UART 协议
 │  └─ util/           环形缓冲区
 ├─ src/
-│  ├─ boot/           startup_ch572.S、iap_main.cpp
+│  ├─ boot/           startup_ch572.S、iap_main.cpp、iap_update.cpp
 │  ├─ platform/       寄存器、时钟、GPIO、SysTick、Flash、IAP 标志
 │  ├─ hal/
 │  ├─ usb/
 │  ├─ radio/
 │  └─ main.cpp
 ├─ sdk/               WCH 外设库（仅作参考，已不参与构建）
-└─ tools/             USB IAP、IAP 厂商请求、引导区更新、HEX 合并脚本
+└─ tools/             应用/IAP 升级工具（upgrade.py、common.py）
 ```
 
 ## 分层
@@ -80,7 +81,7 @@ C:/MounRiver/MounRiver_Studio3/resources/app/resources/win32/components/WCH/Tool
 
 ```sh
 cd firmware
-make            # 应用：build/app/rf_uart_dongle_iap.hex
+make            # 应用：build/app/rf_uart_app.hex
 make iap_boot   # 引导程序：build/boot/rf_uart_iap.hex
 make clean
 ```
@@ -109,10 +110,11 @@ make clean
 
 ## 烧录
 
-应用使用 `build/app/rf_uart_dongle_iap.bin`（经 USB IAP 刷入）；引导程序使用
-`build/boot/rf_uart_iap.hex`（首次用 SWD 刷入一次）。
+首次烧录引导程序和应用使用 SWD 或 WCHISPTool（串口/USB ISP）：
+`build/boot/rf_uart_iap.hex`、`build/app/rf_uart_app.hex`。之后两者都可以
+在运行中升级，不再依赖 ISP。
 
-### 串口 ISP
+### 串口 ISP（首次/恢复）
 
 CH340/USB-TTL 接线：
 
@@ -135,64 +137,54 @@ CH340/USB-TTL 接线：
 | 引导程序 | `0x00000000`–`0x00001FFF` | 8 KiB |
 | 应用 | `0x00002000`–`0x0003BFFF` | 232 KiB |
 
-- IAP 标志放在 SRAM 的 `.noinit` 区（`0x20002FF0`），软复位后仍保留，不占用 Flash。
-- 标志值 `0xAA` 表示应用初始化完成，`0x55` 表示下一个目标仍是 IAP；软复位、
-  看门狗复位和手动复位后标志仍然有效，上电复位会丢弃 SRAM 中的旧值。
+- IAP 标志放在 SRAM 的 `.noinit` 区（`0x20002FF0`），复位后仍保留，不占用 Flash。
+- 标志值 `0xAA` 表示应用初始化完成，`0x55` 表示下一次启动停在引导程序的升级模式；
+  软复位、看门狗复位和手动复位后标志仍然有效，上电复位会丢弃 SRAM 中的旧值。
 - 引导程序在跳转应用前先写入 `0x55`，应用仅在 USB 枚举和射频初始化成功后
-  写入 `0xAA`。因此应用启动阶段若复位，引导程序会停留在 ISP，而不是反复
+  写入 `0xAA`。因此应用启动阶段若复位，引导程序会停留在升级模式，而不是反复
   启动损坏的应用。
-- 运行时进入 IAP 使用 USB 厂商控制请求（EP0），不经过串口数据流：
-  `bmRequestType=0x40`、`bRequest=0xB1`、`wValue=0x5A01`、`wIndex=0x4941`。
-  引导程序随后进入 USB ISP。
-- USB ISP 设备为 `VID:PID = 4348:55E0`，命令：`0x80` 编程、`0x81` 擦除、
-  `0x82` 校验、`0x83` 结束并跳转应用。
-- 引导程序保留在 `0x00000000`，应用升级只擦写 `0x00002000` 之后的区域。
-- 应用自身也可以更新引导程序区：厂商请求 `wValue=0x5A02` 进入更新模式后，
-  直接擦写 `0x00000000`–`0x00001FFF`，最后用整区 CRC32 校验并复位。
-  `0x00000000` 的链接和烧写只在应用里发生，引导程序本身无法擦除自己。
+- 运行时进入升级使用 USB 厂商控制请求（EP0），不经过串口数据流：
+  `bmRequestType=0x40`、`bRequest=0xB1`、`wIndex=0x4941`，
+  `wValue=0x5A01` 升级应用、`0x5A02` 升级引导区。
+- 升级应用：应用软复位进入引导程序，引导程序用同样的 CH341 串口和帧协议擦写
+  `0x00002000`–`0x0003BFFF`，CRC 通过后确认应用并复位。
+- 升级引导区：应用不复位，直接擦写 `0x00000000`–`0x00001FFF`，CRC 通过后复位。
+  引导程序保留在 `0x00000000`，无法擦除自己。
 
-运行时触发（需要 `pyusb`；Windows 需 UsbDk 或 WinUSB/libusbK）：
+### 升级（应用运行中）
 
-```sh
-python tools/iap_trigger.py          # 跳转到 IAP 引导程序
-python tools/iap_trigger.py --boot   # 进入引导程序区更新模式
-```
-
-### 更新 IAP 引导程序区（应用运行中）
-
-使用 `tools/app_boot_update.py`，先通过 `tools/iap_trigger.py` 的厂商控制请求
-（`wValue=0x5A02`）进入更新模式，再通过应用的 CH341 串口
-（`VID:PID = 1A86:7523`）发送新的 8 KiB 引导程序镜像：
+统一使用 `tools/upgrade.py`：先发送厂商控制请求进入对应升级模式，再通过 CH341
+串口（`VID:PID = 1A86:7523`）发送帧协议：
 
 ```sh
-python tools/app_boot_update.py build/boot/rf_uart_iap.bin COM5
+python tools/upgrade.py app build/app/rf_uart_app.bin
+python tools/upgrade.py iap build/boot/rf_uart_iap.bin
 ```
 
-运行时触发依赖 `pyusb` 能在 CH341 驱动占用设备时发送控制请求（Windows 需
-UsbDk 或 WinUSB/libusbK）。无法发送控制请求时，用 SWD 或串口 ISP 恢复/烧录。
-
-- 镜像可以是 `.bin`，也可以是起始地址为 `0x0` 的 `.hex`；不足 8 KiB 的部分
-  用 `0xFF` 填充。
+- 不指定 `--port` 时自动查找 CH341 串口；应用升级会等待设备复位后重新出现的
+  串口（引导程序同样使用 CH341 接口）。
+- 触发依赖 `pyusb` 能在 CH341 驱动占用设备时发送控制请求（Windows 需 UsbDk 或
+  WinUSB/libusbK）。无法触发时用 SWD 或串口 ISP 恢复/烧录。
 - 帧格式：`A5 | CMD | LEN_LO LEN_HI | PAYLOAD | XOR`，每条命令回一个状态字节。
-  `0x01` 擦除、`0x02` 写数据、`0x03` 校验、`0x04` 结束（4 字节 CRC32）、
-  `0x05` 中止（仅在擦除前可用）。
-- 擦除开始后必须完整写入并通过 CRC 才会复位；更新过程中掉电时 `0x0` 可能
-  只剩下不完整的引导程序，需要用 SWD 或串口 ISP 恢复。
+  `0x01` 擦除（4 字节长度）、`0x02` 写数据（地址 + 数据）、`0x03` 校验、
+  `0x04` 结束（4 字节 CRC32）、`0x05` 中止（仅在擦除前可用）。
+- 升级过程中掉电时需要用 SWD 或串口 ISP 恢复。
 
 ## 资源占用（默认配置，GCC 15 `-Os`）
 
 | 目标 | Flash | RAM |
 |------|-------|-----|
-| 应用 `rf_uart_dongle_iap` | 12936 B（约 12.6 KiB） | 7652 B（约 7.5 KiB） |
-| 引导程序 `rf_uart_iap` | 4652 B（约 4.5 KiB） | 3252 B（约 3.2 KiB） |
+| 应用 `rf_uart_app` | 12992 B（约 12.7 KiB） | 7652 B（约 7.5 KiB） |
+| 引导程序 `rf_uart_iap` | 7124 B（约 7.0 KiB） | 4540 B（约 4.4 KiB） |
 
-- 应用 Flash 可用 232 KiB，引导程序可用 8 KiB，RAM 均为 12 KiB。
+- 应用 Flash 可用 232 KiB，引导程序可用 8 KiB（剩余约 1 KiB），RAM 均为 12 KiB。
 
 ## 验证状态
 
 - `make`：通过。
 - `make iap_boot`：通过。
-- 串口 ISP 烧录（wchisp，CH570/CH572）：通过。
+- 串口 ISP 烧录（WCHISPTool，CH570/CH572）：通过。
 - 自包含闪存驱动：编译和链接通过，擦写时序需要实机验证。
 - 应用内更新 IAP 引导程序区：编译和链接通过，需实机验证擦写与复位流程。
+- 引导程序更新应用区：编译和链接通过，需实机验证应用复位、重新枚举和擦写流程。
 - USB 枚举、2.4 GHz 配对和透传：需要实机验证。
