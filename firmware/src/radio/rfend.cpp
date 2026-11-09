@@ -1,5 +1,6 @@
 #include "ch572/radio/rfend.hpp"
 
+#include "ch572/config.hpp"
 #include "ch572/platform/registers.hpp"
 
 
@@ -349,22 +350,22 @@ void calibration() noexcept
     rx_adc();
 }
 
-std::uint8_t tune_filter() noexcept
+CH572_HIGH_CODE std::uint8_t tune_filter() noexcept
 {
     return g_tune_filter;
 }
 
-std::uint8_t tune_filter_2m() noexcept
+CH572_HIGH_CODE std::uint8_t tune_filter_2m() noexcept
 {
     return g_tune_filter_2m;
 }
 
-std::uint32_t wait_recv_time() noexcept
+CH572_HIGH_CODE std::uint32_t wait_recv_time() noexcept
 {
     return g_wait_recv_time;
 }
 
-void set_wait_recv_time(std::uint32_t value) noexcept
+CH572_HIGH_CODE void set_wait_recv_time(std::uint32_t value) noexcept
 {
     g_wait_recv_time = value;
 }

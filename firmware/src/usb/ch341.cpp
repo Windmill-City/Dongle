@@ -142,7 +142,7 @@ void Ch341Serial::device_parameters_init()
     }
 }
 
-CH572_HIGH_CODE void Ch341Serial::handle_setup(std::uint8_t length)
+void Ch341Serial::handle_setup(std::uint8_t length)
 {
     auto *setup = reinterpret_cast<SetupRequest *>(m_ep0_buffer);
     std::uint8_t response[8];

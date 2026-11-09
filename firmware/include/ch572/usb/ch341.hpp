@@ -39,7 +39,7 @@ public:
     CH572_HIGH_CODE void irq_handler();
     void set_source(ByteSource *source) noexcept;
 
-    HostReadResult read_host(void *dst, std::size_t max_length);
+    CH572_HIGH_CODE HostReadResult read_host(void *dst, std::size_t max_length);
     const LineCoding &line_coding() const noexcept { return m_line_coding; }
     bool enumerated() const noexcept { return (usbreg_dev_addr() & 0x7Fu) != 0; }
     bool iap_requested() const noexcept { return m_iap_request; }
@@ -78,12 +78,12 @@ private:
 
     void vendor_init();
     void device_parameters_init();
-    void handle_setup(std::uint8_t length);
+    CH572_HIGH_CODE void handle_setup(std::uint8_t length);
     void process_irq();
-    void parse_line_coding(std::uint8_t value);
-    void ch341_register_write(std::uint8_t address, std::uint8_t value);
-    std::uint8_t ch341_register_read(std::uint8_t address, std::uint8_t *value);
-    static std::uint32_t ch341_baud_rate(std::uint8_t divider_high, std::uint8_t divider_low);
+    CH572_HIGH_CODE void parse_line_coding(std::uint8_t value);
+    CH572_HIGH_CODE void ch341_register_write(std::uint8_t address, std::uint8_t value);
+    CH572_HIGH_CODE std::uint8_t ch341_register_read(std::uint8_t address, std::uint8_t *value);
+    CH572_HIGH_CODE static std::uint32_t ch341_baud_rate(std::uint8_t divider_high, std::uint8_t divider_low);
     static void set_in_status(std::uint8_t endpoint, std::uint8_t status);
 
     static std::uint8_t usbreg_dev_addr() noexcept;

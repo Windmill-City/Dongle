@@ -1,5 +1,6 @@
 #include "ch572/platform/clock.hpp"
 
+#include "ch572/config.hpp"
 #include "ch572/platform/registers.hpp"
 
 namespace ch572::clock {
@@ -15,7 +16,7 @@ constexpr std::uint8_t kFlashSckPll = 1u << 4;
 
 } // namespace
 
-void set_hse_capacitance(HseCapacitance capacitance) noexcept
+CH572_HIGH_CODE void set_hse_capacitance(HseCapacitance capacitance) noexcept
 {
     const auto value = static_cast<std::uint8_t>(capacitance);
     sysreg::SafeAccess access;
@@ -23,7 +24,7 @@ void set_hse_capacitance(HseCapacitance capacitance) noexcept
     sysreg::xt32m_tune() = static_cast<std::uint8_t>((tune & 0x0Fu) | (value << 4));
 }
 
-void init_100mhz() noexcept
+CH572_HIGH_CODE void init_100mhz() noexcept
 {
     if ((sysreg::hfck_power_ctrl() & sysreg::kClockXt32mOn) == 0)
     {

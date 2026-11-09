@@ -199,7 +199,7 @@ void read(std::uint32_t address, void *buffer, std::uint32_t length) noexcept
     std::memcpy(buffer, reinterpret_cast<const void *>(address), length);
 }
 
-bool erase(std::uint32_t address, std::uint32_t length) noexcept
+CH572_HIGH_CODE bool erase(std::uint32_t address, std::uint32_t length) noexcept
 {
     if (length == 0u)
     {
@@ -222,7 +222,7 @@ bool erase(std::uint32_t address, std::uint32_t length) noexcept
     return erase_range(start, total);
 }
 
-bool write(std::uint32_t address, const void *buffer, std::uint32_t length) noexcept
+CH572_HIGH_CODE bool write(std::uint32_t address, const void *buffer, std::uint32_t length) noexcept
 {
     if (length == 0u)
     {

@@ -14,6 +14,8 @@ CH572_INTERRUPT CH572_HIGH_CODE void HardFault_Handler(void)
 
 CH572_INTERRUPT CH572_HIGH_CODE void NMI_Handler(void)
 {
+    ch572::sysreg::SafeAccess access;
+    ch572::sysreg::reset_watchdog_ctrl() |= ch572::sysreg::kSoftwareReset;
     for (;;)
     {
     }

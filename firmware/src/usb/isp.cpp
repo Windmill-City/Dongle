@@ -83,7 +83,7 @@ void IspDevice::init() noexcept
     m_write_length = 0;
 }
 
-CH572_HIGH_CODE bool IspDevice::poll() noexcept
+bool IspDevice::poll() noexcept
 {
     const std::uint8_t flags = usbreg::int_fg();
 
@@ -147,7 +147,7 @@ CH572_HIGH_CODE bool IspDevice::poll() noexcept
     return false;
 }
 
-CH572_HIGH_CODE void IspDevice::handle_setup() noexcept
+void IspDevice::handle_setup() noexcept
 {
     auto *setup = reinterpret_cast<SetupRequest *>(m_ep0_buffer);
 
@@ -306,7 +306,7 @@ CH572_HIGH_CODE void IspDevice::handle_setup() noexcept
     }
 }
 
-CH572_HIGH_CODE void IspDevice::handle_ep0_in() noexcept
+void IspDevice::handle_ep0_in() noexcept
 {
     if (m_setup_request == kReqGetDescriptor)
     {
@@ -334,7 +334,7 @@ CH572_HIGH_CODE void IspDevice::handle_ep0_in() noexcept
     usbreg::ep0_ctrl() = usbreg::kUepRResAck | usbreg::kUepTResNak;
 }
 
-CH572_HIGH_CODE void IspDevice::handle_command(std::uint8_t length) noexcept
+void IspDevice::handle_command(std::uint8_t length) noexcept
 {
     if (length < 2)
     {
@@ -414,7 +414,7 @@ CH572_HIGH_CODE void IspDevice::handle_command(std::uint8_t length) noexcept
     }
 }
 
-CH572_HIGH_CODE void IspDevice::send_status(std::uint8_t status) noexcept
+void IspDevice::send_status(std::uint8_t status) noexcept
 {
     m_ep2_buffer[kEp2Size] = status;
     m_ep2_buffer[kEp2Size + 1] = 0;
