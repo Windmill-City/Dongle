@@ -20,7 +20,7 @@ import sys
 import time
 
 APP_START = 0x00002000
-APP_END = 0x0003B000
+APP_END = 0x0003C000
 PACKET = 64
 PROGRAM_DATA = PACKET - 2   # opcode + count
 VERIFY_DATA = PACKET - 6    # opcode + count + 4-byte address

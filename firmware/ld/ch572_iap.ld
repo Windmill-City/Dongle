@@ -155,10 +155,22 @@ SECTIONS
         PROVIDE(_ebss = .);
     } > RAM AT> FLASH
 
+    /*
+     * Reset-retained SRAM shared with the application. The startup code skips
+     * it, and the top 0x20 bytes of RAM are carved out of the stack (see
+     * .stack below), so a reset preserves the IAP request without wasting RAM.
+     */
+    .noinit ORIGIN(RAM) + LENGTH(RAM) - 0x10 (NOLOAD) :
+    {
+        . = ALIGN(4);
+        KEEP(*(.noinit))
+        . = ALIGN(4);
+    } > RAM
+
     PROVIDE(_end = _ebss);
     PROVIDE(end = .);
 
-    .stack ORIGIN(RAM) + LENGTH(RAM) :
+    .stack ORIGIN(RAM) + LENGTH(RAM) - 0x20 :
     {
         . = ALIGN(4);
         PROVIDE(_eusrstack = .);

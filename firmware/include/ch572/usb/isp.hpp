@@ -21,7 +21,7 @@ private:
     static constexpr std::uint8_t kEp0Size = 64;
     static constexpr std::uint8_t kEp2Size = 64;
     static constexpr std::uint32_t kAppStart = 0x00002000u;
-    static constexpr std::uint32_t kAppEnd = 0x0003B000u;
+    static constexpr std::uint32_t kAppEnd = 0x0003C000u;
     static constexpr std::uint32_t kWriteChunk = 256;
 
     static constexpr std::uint8_t kCmdProgram = 0x80;

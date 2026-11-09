@@ -26,12 +26,7 @@ int main()
     // PA0/PA1 are the USB data pins; the two-wire debug interface must be off.
     sysreg::pin_alternate() &= ~sysreg::kPinDebugEnable;
 
-#if defined(HSE_CAP_VALUE)
-    constexpr auto kHseCap = static_cast<clock::HseCapacitance>(HSE_CAP_VALUE);
-#else
-    constexpr auto kHseCap = clock::HseCapacitance::p8;
-#endif
-    clock::set_hse_capacitance(kHseCap);
+    clock::set_hse_capacitance(clock::HseCapacitance::p8);
     clock::init_100mhz();
     iap::mark_app_valid();
 

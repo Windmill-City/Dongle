@@ -2,15 +2,14 @@
  * CH570/CH572 memory layout for the USB-IAP application.
  *
  * IAP bootloader: 0x00000000-0x00001FFF (8 KiB)
- * Application:    0x00002000-0x0003AFFF
- * IAP flag page:  0x0003B000-0x0003BFFF
+ * Application:    0x00002000-0x0003BFFF
  */
 
 ENTRY(_start)
 
 MEMORY
 {
-    FLASH (rx)  : ORIGIN = 0x00002000, LENGTH = 0x39000
+    FLASH (rx)  : ORIGIN = 0x00002000, LENGTH = 0x3A000
     RAM   (xrw) : ORIGIN = 0x20000000, LENGTH = 12K
 }
 
@@ -156,10 +155,22 @@ SECTIONS
         PROVIDE(_ebss = .);
     } > RAM AT> FLASH
 
+    /*
+     * Reset-retained SRAM shared with the bootloader. The startup code skips
+     * it, and the top 0x20 bytes of RAM are carved out of the stack (see
+     * .stack below), so a reset preserves the IAP request without wasting RAM.
+     */
+    .noinit ORIGIN(RAM) + LENGTH(RAM) - 0x10 (NOLOAD) :
+    {
+        . = ALIGN(4);
+        KEEP(*(.noinit))
+        . = ALIGN(4);
+    } > RAM
+
     PROVIDE(_end = _ebss);
     PROVIDE(end = .);
 
-    .stack ORIGIN(RAM) + LENGTH(RAM) :
+    .stack ORIGIN(RAM) + LENGTH(RAM) - 0x20 :
     {
         . = ALIGN(4);
         PROVIDE(_eusrstack = .);

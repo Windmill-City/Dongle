@@ -167,6 +167,11 @@ inline volatile std::uint8_t &reset_watchdog_ctrl() noexcept
 {
     return *reinterpret_cast<volatile std::uint8_t *>(0x40001046u);
 }
+// R8_RESET_STATUS: bits 0..2 report the most recent reset source.
+inline volatile std::uint8_t &reset_status() noexcept
+{
+    return *reinterpret_cast<volatile std::uint8_t *>(0x40001044u);
+}
 inline volatile std::uint8_t &watchdog_count() noexcept
 {
     return *reinterpret_cast<volatile std::uint8_t *>(0x40001043u);
@@ -220,6 +225,11 @@ inline constexpr std::uint16_t kPinDebugEnable = 0x4000;
 inline constexpr std::uint16_t kPinUsbEnable = 0x2000;
 inline constexpr std::uint16_t kUdpPullUpEnable = 0x1000;
 inline constexpr std::uint8_t kSoftwareReset = 0x01;
+inline constexpr std::uint8_t kResetFlagMask = 0x07;
+inline constexpr std::uint8_t kResetFlagSoftware = 0x00;
+inline constexpr std::uint8_t kResetFlagPowerOn = 0x01;
+inline constexpr std::uint8_t kResetFlagWatchdog = 0x02;
+inline constexpr std::uint8_t kResetFlagManual = 0x03;
 
 class SafeAccess
 {
