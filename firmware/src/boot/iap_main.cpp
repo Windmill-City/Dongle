@@ -42,11 +42,12 @@ int main()
         sysreg::reset_watchdog_ctrl() &= ~0x06u;
     }
 
-    gpio::clear(Pin::p7);
-    gpio::configure(Pin::p7, gpio::Mode::output_push_pull_5ma);
     systick::start(6400u); // reset-default 6.4 MHz
 
 #if defined(IAP_DEBUG)
+    gpio::clear(Pin::p7);
+    gpio::configure(Pin::p7, gpio::Mode::output_push_pull_5ma);
+
     // Debug build: never leave on its own and never touch PA0/PA1, so a broken
     // application can always be recovered over SWD. The application is started
     // only when the debugger writes the jump magic to kDebugJumpAddress.
@@ -73,6 +74,9 @@ int main()
     {
         usb::IspDevice::jump_to_app();
     }
+
+    gpio::clear(Pin::p7);
+    gpio::configure(Pin::p7, gpio::Mode::output_push_pull_5ma);
 
     // IAP mode: switch to 100 MHz and take over the USB pins.
     clock::set_hse_capacitance(clock::HseCapacitance::p8);
