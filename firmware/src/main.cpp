@@ -2,7 +2,6 @@
 
 #include "ch572/boot/iap_flag.hpp"
 #include "ch572/hal/led.hpp"
-#include "ch572/hal/led_diagnostic.hpp"
 #include "ch572/hal/uart.hpp"
 #include "ch572/platform/clock.hpp"
 #include "ch572/platform/flash.hpp"
@@ -107,22 +106,13 @@ int main()
     }
 #endif
 
-#if defined(UART_DEBUG)
-#elif defined(LED_SQUARE_TEST)
-    constexpr std::uint32_t kSquareTick = 50u * 1000u; // 500 us at 100 MHz
-#elif defined(LED_DIAGNOSTIC)
-    constexpr std::uint32_t kDiagnosticTick = 10u * 1000u * 1000u; // 100 ms at 100 MHz
-#else
+#if !defined(UART_DEBUG)
     constexpr std::uint32_t kBlinkTicks = 50u * 1000u * 1000u; // 500 ms at 100 MHz
 #endif
 
     hal::Led led;
     led.init();
-#if defined(LED_DIAGNOSTIC) || defined(LED_SQUARE_TEST)
-    led.off();
-#else
     led.on();
-#endif
 
     // PA0/PA1 are the USB data pins; the two-wire debug interface must be off.
     sysreg::pin_alternate() &= ~sysreg::kPinDebugEnable;
@@ -147,10 +137,6 @@ int main()
 #if defined(UART_DEBUG)
     hal::uart::init(115200);
     hal::uart::puts("\r\nCH570Q UART debug\r\n");
-#elif defined(LED_SQUARE_TEST)
-    systick::start_periodic(kSquareTick);
-#elif defined(LED_DIAGNOSTIC)
-    systick::start_periodic(kDiagnosticTick);
 #else
     systick::start_free_running();
 #endif
@@ -226,14 +212,9 @@ int main()
     rf_uart::RfUart rf(usb);
     usb.set_source(&rf);
     rf.init();
-#if defined(LED_DIAGNOSTIC)
-    hal::set_led_stage(ch572::rfend::rx_filter_timed_out() ? 2u : 3u);
-#endif
 
-#if !defined(LED_DIAGNOSTIC) && !defined(LED_SQUARE_TEST)
     std::uint32_t last_blink = systick::now();
     bool usb_ready = false;
-#endif
 
 #if defined(APP_IAP)
     // If the application cannot get its USB enumerated, reboot into the IAP
@@ -263,7 +244,6 @@ int main()
         }
 #endif
 
-#if !defined(LED_DIAGNOSTIC) && !defined(LED_SQUARE_TEST)
         const std::uint32_t now = systick::now();
         if (usb.enumerated())
         {
@@ -282,7 +262,6 @@ int main()
                 led.toggle();
             }
         }
-#endif
     }
 #endif
 }

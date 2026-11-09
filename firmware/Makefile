@@ -24,8 +24,8 @@ INCLUDES      := -Iinclude -Isdk/StdPeriphDriver/inc -Isdk/RVMSIS
 COMMON_CXX    := src/platform/gpio.cpp src/platform/clock.cpp \
                  src/platform/fault.cpp src/platform/iap_flag.cpp
 APP_CXX       := src/main.cpp src/platform/systick.cpp \
-                 src/platform/led_diagnostic.cpp src/hal/led.cpp \
-                 src/hal/uart.cpp src/usb/ch341.cpp src/usb/descriptors.cpp \
+                 src/hal/led.cpp src/hal/uart.cpp \
+                 src/usb/ch341.cpp src/usb/descriptors.cpp \
                  src/radio/rfip.cpp src/radio/rf_uart.cpp src/radio/rfend.cpp
 IAP_CXX       := src/boot/iap_main.cpp src/usb/isp.cpp src/platform/systick.cpp
 
