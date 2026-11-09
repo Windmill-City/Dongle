@@ -28,33 +28,12 @@ constexpr std::int32_t signed_div(std::int32_t lhs, std::int32_t rhs) noexcept
     return rhs == 0 ? -1 : lhs / rhs;
 }
 
-std::uint32_t tx_ctune_call(std::int32_t index) noexcept
+std::uint32_t tx_table(std::int32_t delta, std::int32_t acc) noexcept
 {
-    const std::int32_t delta =
-        static_cast<std::int32_t>(g_nco2480) - static_cast<std::int32_t>(g_nco2440);
-    std::int32_t acc = (32 - index) * delta;
     std::uint32_t result = 0;
-
     for (int i = 0; i < 8; ++i)
     {
-        result <<= 4;
-        result |= static_cast<std::uint32_t>(signed_div(acc, 39));
-        acc += delta;
-    }
-    return result;
-}
-
-std::uint32_t tx_ctune_callx(std::int32_t index) noexcept
-{
-    const std::int32_t delta =
-        static_cast<std::int32_t>(g_nco2480) - static_cast<std::int32_t>(g_nco2440);
-    std::int32_t acc = -delta * (index + 7);
-    std::uint32_t result = 0;
-
-    for (int i = 0; i < 8; ++i)
-    {
-        result <<= 4;
-        result |= static_cast<std::uint32_t>(signed_div(acc, 39));
+        result = (result << 4) | static_cast<std::uint32_t>(signed_div(acc, 39));
         acc += delta;
     }
     return result;
@@ -86,6 +65,8 @@ void dev_init() noexcept
         nop();
     }
 }
+
+namespace {
 
 void rx_filter() noexcept
 {
@@ -201,16 +182,17 @@ void tx_ctune() noexcept
     g_nco2440 = static_cast<std::uint8_t>(RfEnd::r32(off::TuneResult) & 0x3Fu);
     g_nga2440 = static_cast<std::uint8_t>((RfEnd::r32(off::GainResult) >> 10) & 0x7Fu);
 
-    RfEnd::r32(off::TxTable0 + 0) = tx_ctune_call(0);
-    RfEnd::r32(off::TxTable0 + 4) = tx_ctune_call(8);
-    RfEnd::r32(off::TxTable0 + 8) = tx_ctune_call(16);
-    RfEnd::r32(off::TxTable0 + 12) = tx_ctune_call(24);
-    RfEnd::r32(off::TxTable0 + 16) = tx_ctune_call(32);
-    RfEnd::r32(off::TxTable0 + 20) = tx_ctune_callx(1);
-    RfEnd::r32(off::TxTable0 + 24) = tx_ctune_callx(9);
-    RfEnd::r32(off::TxTable0 + 28) = tx_ctune_callx(17);
-    RfEnd::r32(off::TxTable0 + 32) = tx_ctune_callx(25);
-    RfEnd::r32(off::TxTable0 + 36) = tx_ctune_callx(33);
+    const std::int32_t nco_delta =
+        static_cast<std::int32_t>(g_nco2480) - static_cast<std::int32_t>(g_nco2440);
+    static constexpr int kCoarse[] = {0, 8, 16, 24, 32};
+    static constexpr int kFine[] = {1, 9, 17, 25, 33};
+    for (int i = 0; i < 5; ++i)
+    {
+        RfEnd::r32(off::TxTable0 + i * 4) =
+            tx_table(nco_delta, (32 - kCoarse[i]) * nco_delta);
+        RfEnd::r32(off::TxTable0 + 20 + i * 4) =
+            tx_table(nco_delta, -(kFine[i] + 7) * nco_delta);
+    }
 
     const std::int32_t co_delta =
         static_cast<std::int32_t>(g_nco2440) - static_cast<std::int32_t>(g_nco2480);
@@ -276,6 +258,8 @@ void tx_ctune() noexcept
         (RfEnd::r32(off::DacRef) & 0x80FFFFFFu) |
         (static_cast<std::uint32_t>(g_nco2480 & 0x7Fu) << 24);
 }
+
+} // namespace
 
 void calibration() noexcept
 {

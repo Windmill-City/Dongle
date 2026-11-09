@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "ch572/config.hpp"
+#include "ch572/usb/usb_common.hpp"
 
 namespace ch572::usb {
 
@@ -12,7 +13,7 @@ public:
     static IspDevice &instance();
 
     void init() noexcept;
-    CH572_HIGH_CODE bool poll() noexcept;
+    CH572_HIGH_CODE void poll() noexcept;
     static void jump_to_app() noexcept;
 
 private:
@@ -20,27 +21,14 @@ private:
 
     static constexpr std::uint8_t kEp0Size = 64;
     static constexpr std::uint8_t kEp2Size = 64;
-    static constexpr std::uint32_t kAppStart = 0x00002000u;
-    static constexpr std::uint32_t kAppEnd = 0x0003C000u;
+    static constexpr std::uint32_t kAppStart = ch572::kAppStart;
+    static constexpr std::uint32_t kAppEnd = ch572::kAppEnd;
     static constexpr std::uint32_t kWriteChunk = 256;
 
     static constexpr std::uint8_t kCmdProgram = 0x80;
     static constexpr std::uint8_t kCmdErase = 0x81;
     static constexpr std::uint8_t kCmdVerify = 0x82;
     static constexpr std::uint8_t kCmdEnd = 0x83;
-
-    struct SetupRequest
-    {
-        std::uint8_t request_type;
-        std::uint8_t request;
-        std::uint8_t value_l;
-        std::uint8_t value_h;
-        std::uint8_t index_l;
-        std::uint8_t index_h;
-        std::uint8_t length_l;
-        std::uint8_t length_h;
-    };
-    static_assert(sizeof(SetupRequest) == 8, "USB setup packet is eight bytes");
 
     CH572_HIGH_CODE void handle_setup() noexcept;
     CH572_HIGH_CODE void handle_ep0_in() noexcept;

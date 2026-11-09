@@ -12,8 +12,6 @@ namespace {
 // program sequences below are ported from the WCH reference driver and must
 // run from RAM (.highcode): instruction fetch from flash is unavailable while
 // the serial interface owns the array.
-constexpr std::uint32_t kFlashEnd = 0x0003C000u;
-constexpr std::uint32_t kSectorSize = 0x1000u;
 constexpr std::uint32_t kPageMask = 0xFFu;
 
 constexpr std::uint8_t kCmdWriteEnable = 0x06;
@@ -194,11 +192,6 @@ CH572_HIGH_CODE bool erase_range(std::uint32_t address, std::uint32_t length) no
 
 } // namespace
 
-void read(std::uint32_t address, void *buffer, std::uint32_t length) noexcept
-{
-    std::memcpy(buffer, reinterpret_cast<const void *>(address), length);
-}
-
 CH572_HIGH_CODE bool erase(std::uint32_t address, std::uint32_t length) noexcept
 {
     if (length == 0u)
@@ -210,9 +203,9 @@ CH572_HIGH_CODE bool erase(std::uint32_t address, std::uint32_t length) noexcept
         return false;
     }
 
-    const std::uint32_t start = address & ~(kSectorSize - 1u);
+    const std::uint32_t start = address & ~(kFlashSectorSize - 1u);
     std::uint32_t total = (address - start) + length;
-    total = (total + kSectorSize - 1u) & ~(kSectorSize - 1u);
+    total = (total + kFlashSectorSize - 1u) & ~(kFlashSectorSize - 1u);
     if (total > kFlashEnd - start)
     {
         return false;

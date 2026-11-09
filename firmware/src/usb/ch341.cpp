@@ -4,6 +4,7 @@
 
 #include "ch572/config.hpp"
 #include "ch572/platform/registers.hpp"
+#include "ch572/usb/usb_common.hpp"
 
 namespace ch572::usb {
 namespace {
@@ -12,9 +13,6 @@ constexpr std::uint8_t kRequestDebugRead = 0x95;
 constexpr std::uint8_t kRequestDebugWrite = 0x9A;
 constexpr std::uint8_t kRequestUartInit = 0xA1;
 constexpr std::uint8_t kRequestUartModemOut = 0xA4;
-constexpr std::uint8_t kRequestBufferClear = 0xB2;
-constexpr std::uint8_t kRequestI2c = 0x54;
-constexpr std::uint8_t kRequestDelay = 0x5E;
 constexpr std::uint8_t kRequestGetVersion = 0x5F;
 
 constexpr std::uint8_t kClassSetLineCoding = 0x20;
@@ -22,32 +20,6 @@ constexpr std::uint8_t kClassGetLineCoding = 0x21;
 constexpr std::uint8_t kClassSetControlLineState = 0x22;
 constexpr std::uint8_t kClassSerialState = 0x20;
 
-constexpr std::uint8_t kStandardGetStatus = 0x00;
-constexpr std::uint8_t kStandardClearFeature = 0x01;
-constexpr std::uint8_t kStandardSetAddress = 0x05;
-constexpr std::uint8_t kStandardGetDescriptor = 0x06;
-constexpr std::uint8_t kStandardGetConfiguration = 0x08;
-constexpr std::uint8_t kStandardSetConfiguration = 0x09;
-constexpr std::uint8_t kStandardGetInterface = 0x0A;
-
-constexpr std::uint8_t kDescriptorDevice = 1;
-constexpr std::uint8_t kDescriptorConfig = 2;
-constexpr std::uint8_t kDescriptorString = 3;
-constexpr std::uint8_t kDescriptorQualifier = 6;
-
-constexpr std::uint8_t kRequestTypeIn = 0x80;
-constexpr std::uint8_t kRequestTypeMask = 0x60;
-constexpr std::uint8_t kRequestTypeStandard = 0x00;
-constexpr std::uint8_t kRequestTypeClass = 0x20;
-constexpr std::uint8_t kRequestTypeVendor = 0x40;
-constexpr std::uint8_t kRecipientMask = 0x1F;
-constexpr std::uint8_t kRecipientDevice = 0x00;
-constexpr std::uint8_t kRecipientEndpoint = 0x02;
-
-constexpr std::uint8_t kUart5Bits = 5;
-constexpr std::uint8_t kUart6Bits = 6;
-constexpr std::uint8_t kUart7Bits = 7;
-constexpr std::uint8_t kUart8Bits = 8;
 constexpr std::uint8_t kUart1Stop = 1;
 constexpr std::uint8_t kUart2Stop = 2;
 constexpr std::uint8_t kParityNone = 0x00;
@@ -57,7 +29,6 @@ constexpr std::uint8_t kParityMark = 0x03;
 constexpr std::uint8_t kParitySpace = 0x04;
 
 constexpr std::uint8_t kStall = 0xFF;
-constexpr std::uint8_t kTransferSetup = 0x20u | 0x10u;
 constexpr std::uint8_t kTokenOut = 0x00;
 constexpr std::uint8_t kTokenIn = 0x20;
 constexpr std::uint8_t kToggleOk = 0x40;
@@ -120,7 +91,7 @@ void Ch341Serial::vendor_init()
 void Ch341Serial::device_parameters_init()
 {
     m_line_coding.baud_rate = 115200;
-    m_line_coding.data_bits = kUart8Bits;
+    m_line_coding.data_bits = 8;
     m_line_coding.parity = kParityNone;
     m_line_coding.stop_bits = kUart1Stop;
     m_line_coding.io_status = 0;
@@ -131,24 +102,12 @@ void Ch341Serial::device_parameters_init()
         m_ch341_register_address[i] = 0xFF;
         m_ch341_register_value[i] = 0x00;
     }
-    for (std::size_t i = 0; i < kIrqQueueDepth; ++i)
-    {
-        m_irq_pending[i] = 0;
-    }
 }
 
-void Ch341Serial::handle_setup(std::uint8_t length)
+void Ch341Serial::handle_setup()
 {
     auto *setup = reinterpret_cast<SetupRequest *>(m_ep0_buffer);
     std::uint8_t data_direction = kRequestTypeIn;
-
-    if (length != sizeof(SetupRequest))
-    {
-        usbreg::ep0_t_len() = 0;
-        usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
-                             usbreg::kUepRResStall | usbreg::kUepTResStall;
-        return;
-    }
 
     m_setup_length = setup->length_l;
     if (setup->length_h != 0)
@@ -156,7 +115,7 @@ void Ch341Serial::handle_setup(std::uint8_t length)
         m_setup_length = 0xFF;
     }
 
-    length = 0;
+    std::uint8_t length = 0;
     m_setup_request = setup->request;
     if ((setup->request_type & kRequestTypeIn) == 0)
     {
@@ -225,13 +184,6 @@ void Ch341Serial::handle_setup(std::uint8_t length)
             break;
         }
 
-        case kRequestBufferClear:
-        case kRequestI2c:
-        case kRequestDelay:
-        {
-            break;
-        }
-
         case kRequestGetVersion:
         {
             length = 2;
@@ -249,34 +201,10 @@ void Ch341Serial::handle_setup(std::uint8_t length)
     {
         switch (m_setup_request)
         {
-        case kStandardGetDescriptor:
+        case kReqGetDescriptor:
         {
-            const std::uint8_t *descriptor = nullptr;
-            switch (setup->value_h)
-            {
-            case kDescriptorDevice:
-                descriptor = kDeviceDescriptor;
-                break;
-            case kDescriptorConfig:
-                descriptor = kConfigDescriptor;
-                break;
-            case kDescriptorQualifier:
-                descriptor = kQualifierDescriptor;
-                break;
-            case kDescriptorString:
-                switch (setup->value_l)
-                {
-                case 0: descriptor = kLanguageDescriptor; break;
-                case 1: descriptor = kManufacturerDescriptor; break;
-                case 2: descriptor = kProductDescriptor; break;
-                case 3: descriptor = kSerialDescriptor; break;
-                default: break;
-                }
-                break;
-            default:
-                break;
-            }
-
+            const std::uint8_t *descriptor =
+                find_descriptor(kDescriptors, setup->value_h, setup->value_l);
             if (descriptor == nullptr)
             {
                 length = kStall;
@@ -297,12 +225,12 @@ void Ch341Serial::handle_setup(std::uint8_t length)
             break;
         }
 
-        case kStandardSetAddress:
+        case kReqSetAddress:
             m_device_info.flags |= kAddressFlag;
             m_device_info.address = setup->value_l;
             break;
 
-        case kStandardGetConfiguration:
+        case kReqGetConfiguration:
             m_ep0_buffer[0] = m_device_info.config;
             if (m_setup_length >= 1)
             {
@@ -310,11 +238,11 @@ void Ch341Serial::handle_setup(std::uint8_t length)
             }
             break;
 
-        case kStandardSetConfiguration:
+        case kReqSetConfiguration:
             m_device_info.config = setup->value_l;
             break;
 
-        case kStandardClearFeature:
+        case kReqClearFeature:
             if ((setup->request_type & kRecipientMask) == kRecipientDevice)
             {
                 usbreg::ep1_ctrl() = (usbreg::ep1_ctrl() & ~(usbreg::kUepTTog | usbreg::kMaskUepTRes)) | usbreg::kUepTResNak;
@@ -347,7 +275,7 @@ void Ch341Serial::handle_setup(std::uint8_t length)
             }
             break;
 
-        case kStandardGetInterface:
+        case kReqGetInterface:
             m_ep0_buffer[0] = 0;
             if (m_setup_length >= 1)
             {
@@ -355,7 +283,7 @@ void Ch341Serial::handle_setup(std::uint8_t length)
             }
             break;
 
-        case kStandardGetStatus:
+        case kReqGetStatus:
             m_ep0_buffer[0] = 0;
             m_ep0_buffer[1] = 0;
             length = m_setup_length >= 2 ? 2 : m_setup_length;
@@ -413,28 +341,16 @@ void Ch341Serial::handle_setup(std::uint8_t length)
         m_setup_request = kStall;
         usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
                              usbreg::kUepRResStall | usbreg::kUepTResStall;
+        return;
     }
-    else if (length <= kEp0Size)
-    {
-        if (m_setup_request == kStandardGetDescriptor)
-        {
-            usbreg::ep0_t_len() = length;
-            usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
-                                 usbreg::kUepRResAck | usbreg::kUepTResAck;
-        }
-        else
-        {
-            usbreg::ep0_t_len() = length;
-            usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
-                                 usbreg::kUepRResNak | usbreg::kUepTResAck;
-        }
-    }
-    else
-    {
-        usbreg::ep0_t_len() = 0;
-        usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
-                             usbreg::kUepRResAck | usbreg::kUepTResAck;
-    }
+
+    const bool data_in = (length <= kEp0Size);
+    usbreg::ep0_t_len() = data_in ? length : 0;
+    const std::uint8_t rx_response =
+        (data_in && m_setup_request != kReqGetDescriptor) ? usbreg::kUepRResNak
+                                                          : usbreg::kUepRResAck;
+    usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
+                         rx_response | usbreg::kUepTResAck;
 }
 
 void Ch341Serial::irq_handler()
@@ -443,21 +359,20 @@ void Ch341Serial::irq_handler()
     {
         if ((usbreg::int_st() & usbreg::kMaskUisToken) != usbreg::kMaskUisToken)
         {
-            m_irq_pending[m_irq_write_index] = 1;
-            m_irq_pid[m_irq_write_index] = usbreg::int_st();
-            m_irq_length[m_irq_write_index] = usbreg::rx_len();
+            const std::uint8_t pid = usbreg::int_st();
+            const std::uint8_t length = usbreg::rx_len();
+            const bool toggle_ok = (usbreg::int_fg() & kToggleOk) != 0;
 
-            switch (m_irq_pid[m_irq_write_index] & 0x3Fu)
+            switch (pid & 0x3Fu)
             {
             case kTokenOut | 2:
-                if ((usbreg::int_fg() & kToggleOk) != 0)
+                if (toggle_ok)
                 {
                     usbreg::ep2_ctrl() ^= usbreg::kUepRTog;
-                    const std::size_t data_length = m_irq_length[m_irq_write_index];
-                    m_rx_buffer.write(m_ep2_buffer, data_length);
+                    m_rx_buffer.write(m_ep2_buffer, length);
 
                     static constexpr std::uint8_t kIapMagic[] = {0x55, 0xAA, 0x49, 0x41, 0x50};
-                    for (std::size_t i = 0; i < data_length; ++i)
+                    for (std::size_t i = 0; i < length; ++i)
                     {
                         const std::uint8_t value = m_ep2_buffer[i];
                         if (value == kIapMagic[m_iap_match])
@@ -479,10 +394,6 @@ void Ch341Serial::irq_handler()
                         usbreg::ep2_ctrl() = (usbreg::ep2_ctrl() & ~usbreg::kMaskUepRRes) | usbreg::kUepRResNak;
                     }
                 }
-                else
-                {
-                    m_irq_pending[m_irq_write_index] = 0;
-                }
                 break;
 
             case kTokenIn | 2:
@@ -491,14 +402,10 @@ void Ch341Serial::irq_handler()
                 break;
 
             case kTokenOut | 1:
-                if ((usbreg::int_fg() & kToggleOk) != 0)
+                if (toggle_ok)
                 {
                     usbreg::ep1_ctrl() ^= usbreg::kUepRTog;
-                    usbreg::ep1_ctrl() = (usbreg::ep1_ctrl() & 0xF3u) | 0x08u;
-                }
-                else
-                {
-                    m_irq_pending[m_irq_write_index] = 0;
+                    usbreg::ep1_ctrl() &= 0xF3u;
                 }
                 break;
 
@@ -508,27 +415,34 @@ void Ch341Serial::irq_handler()
                 break;
 
             case kTokenOut | 0:
-                if ((usbreg::int_fg() & kToggleOk) != 0)
+                if (toggle_ok)
                 {
                     usbreg::ep0_ctrl() = (usbreg::ep0_ctrl() & 0xF3u) | 0x08u;
-                }
-                else
-                {
-                    m_irq_pending[m_irq_write_index] = 0;
+                    if (length != 0 && m_setup_request == kClassSetLineCoding)
+                    {
+                        std::memcpy(&m_line_coding.baud_rate, m_ep0_buffer, 4);
+                        m_line_coding.stop_bits = m_ep0_buffer[4];
+                        m_line_coding.parity = m_ep0_buffer[5];
+                        m_line_coding.data_bits = m_ep0_buffer[6];
+                        m_line_coding_changed = true;
+                        usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
+                                             usbreg::kUepRResNak | usbreg::kUepTResAck;
+                    }
+                    else
+                    {
+                        usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
+                                             usbreg::kUepRResNak | usbreg::kUepTResNak;
+                    }
                 }
                 break;
 
             case kTokenIn | 0:
                 usbreg::ep0_ctrl() = (usbreg::ep0_ctrl() & 0xFCu) | kInNak;
+                handle_ep0_in();
                 break;
 
             default:
                 break;
-            }
-
-            if (m_irq_pending[m_irq_write_index] != 0)
-            {
-                m_irq_write_index = static_cast<std::uint8_t>((m_irq_write_index + 1) % kIrqQueueDepth);
             }
 
             usbreg::int_fg() = usbreg::kUifTransfer;
@@ -539,7 +453,7 @@ void Ch341Serial::irq_handler()
             // Handle the setup packet immediately in the ISR. Deferring it to
             // poll() (which runs from flash) delays the descriptor reply past
             // the host's enumeration timeout.
-            handle_setup(8);
+            handle_setup();
             usbreg::int_fg() = usbreg::kUifTransfer;
         }
     }
@@ -561,107 +475,60 @@ void Ch341Serial::irq_handler()
     }
 }
 
-void Ch341Serial::process_irq()
+void Ch341Serial::handle_ep0_in()
 {
-    const std::uint8_t index = m_irq_read_index;
-    m_irq_read_index = static_cast<std::uint8_t>((m_irq_read_index + 1) % kIrqQueueDepth);
-
-    switch (m_irq_pid[index] & 0x3Fu)
+    switch (m_setup_request)
     {
-    case kTokenOut | 1:
-        usbreg::ep1_ctrl() &= 0xF3u;
-        break;
-
-    case kTransferSetup | 0:
-        handle_setup(m_irq_length[index]);
-        break;
-
-    case kTokenIn | 0:
-        switch (m_setup_request)
-        {
-        case kStandardGetDescriptor:
-        {
-            std::uint8_t length = m_setup_length >= kEp0Size ? kEp0Size : m_setup_length;
-            std::memcpy(m_ep0_buffer, m_descriptor, length);
-            m_setup_length = static_cast<std::uint8_t>(m_setup_length - length);
-            m_descriptor += length;
-
-            if (length != 0)
-            {
-                usbreg::ep0_t_len() = length;
-                usbreg::ep0_ctrl() ^= usbreg::kUepTTog;
-                usbreg::ep0_ctrl() &= ~0x03u;
-            }
-            else
-            {
-                usbreg::ep0_t_len() = length;
-                usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
-                                     usbreg::kUepRResAck | usbreg::kUepTResNak;
-            }
-            break;
-        }
-
-        case kStandardSetAddress:
-            usbreg::dev_addr() = (usbreg::dev_addr() & 0x80u) | m_device_info.address;
-            usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
-                                 usbreg::kUepRResNak | usbreg::kUepTResNak;
-            break;
-
-        case kRequestDebugRead:
-        case kRequestGetVersion:
-        case kClassGetLineCoding:
-            usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
-                                 usbreg::kUepRResAck | usbreg::kUepTResNak;
-            break;
-
-        case kClassSetLineCoding:
-            usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
-                                 usbreg::kUepRResNak | usbreg::kUepTResNak;
-            break;
-
-        default:
-            usbreg::ep0_t_len() = 0;
-            usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
-                                 usbreg::kUepRResNak | usbreg::kUepTResNak;
-            break;
-        }
-        break;
-
-    case kTokenOut | 0:
+    case kReqGetDescriptor:
     {
-        const std::uint8_t length = m_irq_length[index];
-        if (length != 0 && m_setup_request == kClassSetLineCoding)
+        std::uint8_t length = m_setup_length >= kEp0Size ? kEp0Size : m_setup_length;
+        std::memcpy(m_ep0_buffer, m_descriptor, length);
+        m_setup_length = static_cast<std::uint8_t>(m_setup_length - length);
+        m_descriptor += length;
+
+        if (length != 0)
         {
-            std::memcpy(&m_line_coding.baud_rate, m_ep0_buffer, 4);
-            m_line_coding.stop_bits = m_ep0_buffer[4];
-            m_line_coding.parity = m_ep0_buffer[5];
-            m_line_coding.data_bits = m_ep0_buffer[6];
-            m_line_coding_changed = true;
-            usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
-                                 usbreg::kUepRResNak | usbreg::kUepTResAck;
+            usbreg::ep0_t_len() = length;
+            usbreg::ep0_ctrl() ^= usbreg::kUepTTog;
+            usbreg::ep0_ctrl() &= ~0x03u;
         }
         else
         {
+            usbreg::ep0_t_len() = length;
             usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
-                                 usbreg::kUepRResNak | usbreg::kUepTResNak;
+                                 usbreg::kUepRResAck | usbreg::kUepTResNak;
         }
         break;
     }
 
+    case kReqSetAddress:
+        usbreg::dev_addr() = (usbreg::dev_addr() & 0x80u) | m_device_info.address;
+        usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
+                             usbreg::kUepRResNak | usbreg::kUepTResNak;
+        break;
+
+    case kRequestDebugRead:
+    case kRequestGetVersion:
+    case kClassGetLineCoding:
+        usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
+                             usbreg::kUepRResAck | usbreg::kUepTResNak;
+        break;
+
+    case kClassSetLineCoding:
+        usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
+                             usbreg::kUepRResNak | usbreg::kUepTResNak;
+        break;
+
     default:
+        usbreg::ep0_t_len() = 0;
+        usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
+                             usbreg::kUepRResNak | usbreg::kUepTResNak;
         break;
     }
 }
 
 void Ch341Serial::poll()
 {
-    const std::uint8_t index = m_irq_read_index;
-    if (m_irq_pending[index] != 0)
-    {
-        process_irq();
-        m_irq_pending[index] = 0;
-    }
-
     if (!enumerated())
     {
         return;
@@ -711,71 +578,35 @@ void Ch341Serial::set_source(ByteSource *source) noexcept
 
 void Ch341Serial::parse_line_coding(std::uint8_t value)
 {
-    std::uint8_t data_bits = value & 0x03u;
-    std::uint8_t parity = value & 0x38u;
+    static constexpr std::uint8_t kDataBits[4] = {5, 6, 7, 8};
 
-    if (data_bits == 0x00)
+    std::uint8_t parity;
+    switch (value & 0x38u)
     {
-        data_bits = kUart5Bits;
-    }
-    else if (data_bits == 0x01)
-    {
-        data_bits = kUart6Bits;
-    }
-    else if (data_bits == 0x02)
-    {
-        data_bits = kUart7Bits;
-    }
-    else
-    {
-        data_bits = kUart8Bits;
-    }
-
-    if (parity == 0x00)
-    {
-        parity = kParityNone;
-    }
-    else if (parity == 0x08)
-    {
-        parity = kParityOdd;
-    }
-    else if (parity == 0x18)
-    {
-        parity = kParityEven;
-    }
-    else if (parity == 0x28)
-    {
-        parity = kParityMark;
-    }
-    else
-    {
-        parity = kParitySpace;
+    case 0x00: parity = kParityNone; break;
+    case 0x08: parity = kParityOdd; break;
+    case 0x18: parity = kParityEven; break;
+    case 0x28: parity = kParityMark; break;
+    default: parity = kParitySpace; break;
     }
 
     m_line_coding.stop_bits = (value & 0x04u) != 0 ? kUart2Stop : kUart1Stop;
     m_line_coding.parity = parity;
-    m_line_coding.data_bits = data_bits;
+    m_line_coding.data_bits = kDataBits[value & 0x03u];
 }
 
 void Ch341Serial::ch341_register_write(std::uint8_t address, std::uint8_t value)
 {
-    std::size_t index = 0;
-    for (; index < kCh341RegisterCount; ++index)
+    for (std::size_t i = 0; i < kCh341RegisterCount; ++i)
     {
-        if (m_ch341_register_address[index] == address)
+        if (m_ch341_register_address[i] == address ||
+            m_ch341_register_address[i] == 0xFF)
         {
-            m_ch341_register_value[index] = value;
-            break;
-        }
-        if (m_ch341_register_address[index] == 0xFF)
-        {
-            m_ch341_register_address[index] = address;
-            m_ch341_register_value[index] = value;
+            m_ch341_register_address[i] = address;
+            m_ch341_register_value[i] = value;
             break;
         }
     }
-
-    (void)index;
 
     if (address == 0x18)
     {
@@ -783,15 +614,13 @@ void Ch341Serial::ch341_register_write(std::uint8_t address, std::uint8_t value)
     }
 }
 
-std::uint8_t Ch341Serial::ch341_register_read(std::uint8_t address, std::uint8_t *value)
+void Ch341Serial::ch341_register_read(std::uint8_t address, std::uint8_t *value) const
 {
     *value = 0;
-    std::uint8_t found = 0;
     for (std::size_t i = 0; i < kCh341RegisterCount; ++i)
     {
         if (m_ch341_register_address[i] == address)
         {
-            found = 1;
             *value = m_ch341_register_value[i];
             break;
         }
@@ -809,8 +638,6 @@ std::uint8_t Ch341Serial::ch341_register_read(std::uint8_t address, std::uint8_t
     {
         *value = 0;
     }
-
-    return found;
 }
 
 std::uint32_t Ch341Serial::ch341_baud_rate(std::uint8_t divider_high, std::uint8_t divider_low)

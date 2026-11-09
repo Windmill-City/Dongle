@@ -18,10 +18,21 @@ namespace rfend_reg = radio_reg::rfend;
 namespace rfend_block = ch572::rfend;
 
 RoleConfig g_role_config{};
-ProcessCallback g_lle_process = nullptr;
 std::uint32_t g_wait_recv_time = 0;
 
-CH572_HIGH_CODE void rf_basic_process(RoleState state) noexcept;
+// Raw LLE interrupt bits. Bit 2 means "TX finished" in the LLE status register;
+// the timeout is bit 17. Keep the decoding here so the public RoleEvent values
+// stay independent of the vendor register layout.
+inline constexpr std::uint32_t kLleRx = 1u << 0;
+inline constexpr std::uint32_t kLleTxDone = 1u << 2;
+inline constexpr std::uint32_t kLleTimeout = 1u << 17;
+inline constexpr std::uint32_t kLleTimerIrq = 0x200000u;
+
+CH572_HIGH_CODE void rf_basic_process(std::uint32_t raw_irq) noexcept;
+void wakeup_reg_init() noexcept;
+void calibration() noexcept;
+CH572_HIGH_CODE std::uint8_t read_crc() noexcept;
+void stop() noexcept;
 
 inline std::uint32_t read_u32(const void *address) noexcept
 {
@@ -261,63 +272,52 @@ CH572_HIGH_CODE void set_phy_rx_mode(std::uint32_t properties, std::uint8_t rx_m
     g_wait_recv_time = ((static_cast<std::uint32_t>(rx_max_len) + 3u) << 4) + 60u;
 }
 
-CH572_HIGH_CODE void rf_basic_process(RoleState state) noexcept
+CH572_HIGH_CODE void notify(RoleEvent event) noexcept
 {
-    if ((state & kStateTimeout) != 0)
+    if (g_role_config.process_cb != nullptr)
     {
-        Lle::r32(lle::Timer) = 0;
-        Lle::r32(lle::Irq) = 0x200000u;
-        state &= ~(1u << 17);
-        if (g_role_config.process_cb != nullptr &&
-            (g_role_config.process_mask & kStateTxFinish) != 0)
-        {
-            g_role_config.process_cb(kStateTxFinish);
-        }
+        g_role_config.process_cb(event);
+    }
+}
+
+CH572_HIGH_CODE void stop_lle_timer() noexcept
+{
+    Lle::r32(lle::Timer) = 0;
+    Lle::r32(lle::Irq) = kLleTimerIrq;
+}
+
+CH572_HIGH_CODE void rf_basic_process(std::uint32_t raw_irq) noexcept
+{
+    // A TX-done event suppresses the timeout event in the same status word.
+    const bool tx_done = (raw_irq & kLleTxDone) != 0;
+    if (tx_done)
+    {
+        stop_lle_timer();
+        notify(kEventTxFinish);
     }
 
-    if ((state & kStateRx) != 0)
+    if ((raw_irq & kLleRx) != 0)
     {
-        Lle::r32(lle::Timer) = 0;
-        Lle::r32(lle::Irq) = 0x200000u;
-        if (read_crc() == 0)
-        {
-            if (g_role_config.process_cb != nullptr &&
-                (g_role_config.process_mask & kStateRx) != 0)
-            {
-                g_role_config.process_cb(kStateRx);
-            }
-        }
-        else
-        {
-            if (g_role_config.process_cb != nullptr &&
-                (g_role_config.process_mask & kStateCrcError) != 0)
-            {
-                g_role_config.process_cb(kStateCrcError);
-            }
-        }
+        stop_lle_timer();
+        notify((read_crc() == 0) ? kEventRx : kEventCrcError);
     }
 
-    if ((state & (1u << 17)) != 0)
+    if (!tx_done && (raw_irq & kLleTimeout) != 0)
     {
-        if (g_role_config.process_cb != nullptr &&
-            (g_role_config.process_mask & kStateTimeout) != 0)
-        {
-            g_role_config.process_cb(kStateTimeout);
-        }
+        notify(kEventTimeout);
     }
 }
 
 } // namespace
 
-Status role_init(RoleConfig *config) noexcept
+void role_init(RoleConfig *config) noexcept
 {
     if (config == nullptr)
     {
-        return 1;
+        return;
     }
 
     g_role_config = *config;
-    g_lle_process = &rf_basic_process;
     sysreg::iwdg_feed();
 
     rfend_block::dev_init();
@@ -331,8 +331,9 @@ Status role_init(RoleConfig *config) noexcept
 
     enable_irq(Irq::BleBb);
     enable_irq(Irq::BleLle);
-    return 0;
 }
+
+namespace {
 
 void wakeup_reg_init() noexcept
 {
@@ -383,11 +384,13 @@ std::uint8_t read_crc() noexcept
     return static_cast<std::uint8_t>((Bb::r32(bb::CrcStatus) >> 5) & 1u);
 }
 
-Status start_tx(TxParams *params) noexcept
+} // namespace
+
+void start_tx(TxParams *params) noexcept
 {
     if (params == nullptr)
     {
-        return 1;
+        return;
     }
 
     Lle::r32(lle::Control) |= 8u;
@@ -424,18 +427,13 @@ Status start_tx(TxParams *params) noexcept
     Bb::r32(bb::Control) |= 0x10000000u;
     Bb::r32(bb::TxPower) &= ~3u;
     Lle::r32(lle::Control) = 2u;
-    return 0;
 }
 
-Status set_rx(RxParams *params) noexcept
+void set_rx(RxParams *params) noexcept
 {
-    if (params == nullptr)
+    if (params == nullptr || params->rx_dma == 0)
     {
-        return 1;
-    }
-    if (params->rx_dma == 0)
-    {
-        return 2;
+        return;
     }
 
     Lle::r16(lle::WaitTime) = 4u;
@@ -468,11 +466,11 @@ Status set_rx(RxParams *params) noexcept
     {
         start_lle_timer(params->time_out, 0x200000u);
     }
-
-    return 0;
 }
 
-Status stop() noexcept
+namespace {
+
+void stop() noexcept
 {
     Lle::r32(lle::PhyControl) &= ~0x10u;
     if ((Lle::r32(lle::Control) & 3u) != 0)
@@ -483,17 +481,17 @@ Status stop() noexcept
         Lle::r32(lle::PhyControl) =
             (Lle::r32(lle::PhyControl) & ~0x700u) | 0x500u;
     }
-    return 0;
 }
 
-Status shutdown() noexcept
+} // namespace
+
+void shutdown() noexcept
 {
     stop();
     Bb::r32(bb::Control) =
         (Bb::r32(bb::Control) & 0xFFFCFFFFu) | 0x10000u;
     RfEnd::r32(rfend_reg::Control2) &= 0xFFCDFFFFu;
     Lle::r32(lle::PhyControl) = 0x000F0080u;
-    return 0;
 }
 
 void lle_irq_handler() noexcept
@@ -506,10 +504,7 @@ void lle_irq_handler() noexcept
     }
 
     Lle::r32(lle::Irq) = status;
-    if (g_lle_process != nullptr)
-    {
-        g_lle_process(status & enable);
-    }
+    rf_basic_process(status & enable);
 }
 
 void bb_irq_handler() noexcept

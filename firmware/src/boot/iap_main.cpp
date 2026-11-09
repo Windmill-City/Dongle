@@ -37,10 +37,7 @@ int main()
 {
     using namespace ch572;
 
-    {
-        sysreg::SafeAccess access;
-        sysreg::reset_watchdog_ctrl() &= ~0x06u;
-    }
+    sysreg::disable_watchdog_reset();
 
 #if defined(IAP_DEBUG)
     gpio::clear(Pin::p7);
@@ -121,9 +118,3 @@ int main()
         systick::delay_ms(1u);
     }
 }
-
-
-
-
-
-

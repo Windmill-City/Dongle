@@ -147,8 +147,8 @@ CH340/USB-TTL 接线：
 
 | 目标 | Flash | RAM |
 |------|-------|-----|
-| 应用 `rf_uart_dongle_iap` | 11700 B（约 11.4 KiB） | 6248 B（约 6.1 KiB） |
-| 引导程序 `rf_uart_iap` | 4592 B（约 4.5 KiB） | 2636 B（约 2.6 KiB） |
+| 应用 `rf_uart_dongle_iap` | 10632 B（约 10.4 KiB） | 6596 B（约 6.4 KiB） |
+| 引导程序 `rf_uart_iap` | 4620 B（约 4.5 KiB） | 3252 B（约 3.2 KiB） |
 
 - 应用 Flash 可用 232 KiB，引导程序可用 8 KiB，RAM 均为 12 KiB。
 

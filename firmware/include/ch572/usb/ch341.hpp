@@ -6,6 +6,7 @@
 #include "ch572/config.hpp"
 #include "ch572/platform/registers.hpp"
 #include "ch572/usb/descriptors.hpp"
+#include "ch572/usb/usb_common.hpp"
 #include "ch572/util/ring_buffer.hpp"
 
 namespace ch572::usb {
@@ -52,22 +53,8 @@ private:
     static constexpr std::size_t kPacketSize = 64;
     static constexpr std::size_t kUsbBufferSize = 256;
     static constexpr std::size_t kCh341RegisterCount = 10;
-    static constexpr std::size_t kIrqQueueDepth = 4;
     static constexpr std::uint8_t kInNak = 2;
     static constexpr std::uint8_t kAddressFlag = 0x04;
-
-    struct SetupRequest
-    {
-        std::uint8_t request_type;
-        std::uint8_t request;
-        std::uint8_t value_l;
-        std::uint8_t value_h;
-        std::uint8_t index_l;
-        std::uint8_t index_h;
-        std::uint8_t length_l;
-        std::uint8_t length_h;
-    };
-    static_assert(sizeof(SetupRequest) == 8, "USB setup packet is eight bytes");
 
     struct DeviceInfo
     {
@@ -78,11 +65,11 @@ private:
 
     void vendor_init();
     void device_parameters_init();
-    CH572_HIGH_CODE void handle_setup(std::uint8_t length);
-    void process_irq();
+    CH572_HIGH_CODE void handle_setup();
+    void handle_ep0_in();
     CH572_HIGH_CODE void parse_line_coding(std::uint8_t value);
     CH572_HIGH_CODE void ch341_register_write(std::uint8_t address, std::uint8_t value);
-    CH572_HIGH_CODE std::uint8_t ch341_register_read(std::uint8_t address, std::uint8_t *value);
+    CH572_HIGH_CODE void ch341_register_read(std::uint8_t address, std::uint8_t *value) const;
     CH572_HIGH_CODE static std::uint32_t ch341_baud_rate(std::uint8_t divider_high, std::uint8_t divider_low);
 
     DeviceInfo m_device_info;
@@ -98,13 +85,7 @@ private:
     std::uint8_t m_ch341_register_value[kCh341RegisterCount]{};
 
     LineCoding m_line_coding{};
-    bool m_line_coding_changed = false;
-
-    std::uint8_t m_irq_write_index = 0;
-    std::uint8_t m_irq_read_index = 0;
-    volatile std::uint8_t m_irq_length[kIrqQueueDepth]{};
-    volatile std::uint8_t m_irq_pid[kIrqQueueDepth]{};
-    volatile std::uint8_t m_irq_pending[kIrqQueueDepth]{};
+    volatile bool m_line_coding_changed = false;
 
     RingBuffer<kUsbBufferSize> m_rx_buffer;
     ByteSource *m_source = nullptr;

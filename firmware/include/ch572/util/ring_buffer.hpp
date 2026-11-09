@@ -32,12 +32,6 @@ public:
 
     bool empty() const noexcept { return size() == 0; }
 
-    std::size_t free_size() const noexcept
-    {
-        CriticalSection guard;
-        return N - m_count;
-    }
-
     std::size_t write(const void *src, std::size_t length) noexcept
     {
         if (src == nullptr || length == 0)

@@ -5,27 +5,10 @@
 #include "ch572/platform/flash.hpp"
 #include "ch572/platform/registers.hpp"
 #include "ch572/platform/systick.hpp"
+#include "ch572/usb/usb_common.hpp"
 
 namespace ch572::usb {
 namespace {
-
-constexpr std::uint8_t kRequestTypeMask = 0x60;
-constexpr std::uint8_t kRequestTypeStandard = 0x00;
-constexpr std::uint8_t kRequestTypeIn = 0x80;
-constexpr std::uint8_t kRequestRecipMask = 0x1F;
-constexpr std::uint8_t kRequestRecipEndpoint = 0x02;
-
-constexpr std::uint8_t kReqGetStatus = 0x00;
-constexpr std::uint8_t kReqClearFeature = 0x01;
-constexpr std::uint8_t kReqSetAddress = 0x05;
-constexpr std::uint8_t kReqGetDescriptor = 0x06;
-constexpr std::uint8_t kReqGetConfiguration = 0x08;
-constexpr std::uint8_t kReqSetConfiguration = 0x09;
-constexpr std::uint8_t kReqGetInterface = 0x0A;
-
-constexpr std::uint8_t kDescriptorDevice = 0x01;
-constexpr std::uint8_t kDescriptorConfiguration = 0x02;
-constexpr std::uint8_t kDescriptorString = 0x03;
 
 constexpr std::uint8_t kDeviceDescriptor[] = {
     0x12, 0x01, 0x10, 0x01, 0xFF, 0x80, 0x55, 0x40,
@@ -47,6 +30,21 @@ constexpr std::uint8_t kManufacturerDescriptor[] = {
 constexpr std::uint8_t kProductDescriptor[] = {
     0x0C, 0x03, 'C', 0, 'H', 0, '5', 0, '7', 0, 'x', 0,
 };
+
+constexpr DescriptorSet kDescriptors = {
+    kDeviceDescriptor,
+    kConfigDescriptor,
+    nullptr,
+    {kLangDescriptor, kManufacturerDescriptor, kProductDescriptor, nullptr},
+};
+
+inline std::uint32_t read_le32(const std::uint8_t *data) noexcept
+{
+    return static_cast<std::uint32_t>(data[0]) |
+           (static_cast<std::uint32_t>(data[1]) << 8) |
+           (static_cast<std::uint32_t>(data[2]) << 16) |
+           (static_cast<std::uint32_t>(data[3]) << 24);
+}
 
 } // namespace
 
@@ -83,7 +81,7 @@ void IspDevice::init() noexcept
     m_write_length = 0;
 }
 
-bool IspDevice::poll() noexcept
+void IspDevice::poll() noexcept
 {
     const std::uint8_t flags = usbreg::int_fg();
 
@@ -125,7 +123,7 @@ bool IspDevice::poll() noexcept
             handle_setup();
         }
         usbreg::int_fg() = usbreg::kUifTransfer;
-        return true;
+        return;
     }
 
     if ((flags & usbreg::kUifBusReset) != 0)
@@ -134,17 +132,16 @@ bool IspDevice::poll() noexcept
         usbreg::ep0_ctrl() = usbreg::kUepRResAck | usbreg::kUepTResNak;
         usbreg::ep2_ctrl() = usbreg::kUepRResAck | usbreg::kUepTResNak | usbreg::kUepAutoTog;
         usbreg::int_fg() = usbreg::kUifBusReset;
-        return true;
+        return;
     }
 
     if ((flags & usbreg::kUifSuspend) != 0)
     {
         usbreg::int_fg() = usbreg::kUifSuspend;
-        return true;
+        return;
     }
 
     usbreg::int_fg() = flags;
-    return false;
 }
 
 void IspDevice::handle_setup() noexcept
@@ -171,28 +168,8 @@ void IspDevice::handle_setup() noexcept
         {
         case kReqGetDescriptor:
         {
-            const std::uint8_t *descriptor = nullptr;
-            switch (setup->value_h)
-            {
-            case kDescriptorDevice:
-                descriptor = kDeviceDescriptor;
-                break;
-            case kDescriptorConfiguration:
-                descriptor = kConfigDescriptor;
-                break;
-            case kDescriptorString:
-                switch (setup->value_l)
-                {
-                case 0: descriptor = kLangDescriptor; break;
-                case 1: descriptor = kManufacturerDescriptor; break;
-                case 2: descriptor = kProductDescriptor; break;
-                default: break;
-                }
-                break;
-            default:
-                break;
-            }
-
+            const std::uint8_t *descriptor =
+                find_descriptor(kDescriptors, setup->value_h, setup->value_l);
             if (descriptor == nullptr)
             {
                 error = true;
@@ -228,7 +205,7 @@ void IspDevice::handle_setup() noexcept
             break;
 
         case kReqClearFeature:
-            if (((setup->request_type & kRequestRecipMask) == kRequestRecipEndpoint))
+            if (((setup->request_type & kRecipientMask) == kRecipientEndpoint))
             {
                 if (setup->index_l == 0x82)
                 {
@@ -280,21 +257,10 @@ void IspDevice::handle_setup() noexcept
         return;
     }
 
-    // Use the saved request: the descriptor copy above overwrites the setup
-    // packet that lives at the start of m_ep0_buffer.
-    if (m_setup_request == kReqGetDescriptor || m_setup_request == kReqGetConfiguration ||
-        m_setup_request == kReqGetInterface || m_setup_request == kReqGetStatus)
-    {
-        usbreg::ep0_t_len() = data_length;
-        usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
-                             usbreg::kUepRResAck | usbreg::kUepTResAck;
-    }
-    else
-    {
-        usbreg::ep0_t_len() = 0;
-        usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
-                             usbreg::kUepRResAck | usbreg::kUepTResAck;
-    }
+    // Data-stage requests filled data_length above; control requests left it 0.
+    usbreg::ep0_t_len() = data_length;
+    usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
+                         usbreg::kUepRResAck | usbreg::kUepTResAck;
 }
 
 void IspDevice::handle_ep0_in() noexcept
@@ -367,10 +333,7 @@ void IspDevice::handle_command(std::uint8_t length) noexcept
 
     case kCmdErase:
     {
-        const std::uint32_t address = static_cast<std::uint32_t>(m_command[2]) |
-                                      (static_cast<std::uint32_t>(m_command[3]) << 8) |
-                                      (static_cast<std::uint32_t>(m_command[4]) << 16) |
-                                      (static_cast<std::uint32_t>(m_command[5]) << 24);
+        const std::uint32_t address = read_le32(&m_command[2]);
         std::uint8_t status = 0xFE;
         if (address == kAppStart)
         {
@@ -384,10 +347,7 @@ void IspDevice::handle_command(std::uint8_t length) noexcept
 
     case kCmdVerify:
     {
-        const std::uint32_t address = static_cast<std::uint32_t>(m_command[2]) |
-                                      (static_cast<std::uint32_t>(m_command[3]) << 8) |
-                                      (static_cast<std::uint32_t>(m_command[4]) << 16) |
-                                      (static_cast<std::uint32_t>(m_command[5]) << 24);
+        const std::uint32_t address = read_le32(&m_command[2]);
         const std::uint8_t count = m_command[1];
         const bool ok = flash::verify(address, m_command + 6, count);
         send_status(ok ? 0 : 1);
@@ -425,8 +385,7 @@ void IspDevice::jump_to_app() noexcept
     // illegal instruction on the CH570Q QingKe core, and the application's
     // startup sets mstatus itself before entering main.
     using Entry = void (*)();
-    auto entry = reinterpret_cast<Entry>(kAppStart);
-    entry();
+    reinterpret_cast<Entry>(kAppStart)();
     for (;;)
     {
     }

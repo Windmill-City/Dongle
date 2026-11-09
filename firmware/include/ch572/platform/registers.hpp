@@ -109,14 +109,6 @@ inline void enable_irq(Irq irq) noexcept
     pfic().ienr[index] = bit;
 }
 
-inline void disable_irq(Irq irq) noexcept
-{
-    const auto index = static_cast<std::uint32_t>(irq) >> 5;
-    const auto bit = 1u << (static_cast<std::uint32_t>(irq) & 0x1Fu);
-    pfic().irer[index] = bit;
-    fence_i();
-}
-
 // ---------------------------------------------------------------------------
 // System control registers
 // ---------------------------------------------------------------------------
@@ -172,10 +164,6 @@ inline volatile std::uint8_t &reset_status() noexcept
 {
     return *reinterpret_cast<volatile std::uint8_t *>(0x40001044u);
 }
-inline volatile std::uint8_t &watchdog_count() noexcept
-{
-    return *reinterpret_cast<volatile std::uint8_t *>(0x40001043u);
-}
 // Independent watchdog (IWDT): runs from the 32 kHz LSI, 4..512 prescaler,
 // 12-bit reload.  timeout = prescaler * reload / 32768 s.
 // The R8_WDOG_COUNT above counts at Fsys/131072 (8-bit), so at 100 MHz it can
@@ -212,11 +200,6 @@ inline volatile std::uint16_t &pin_alternate() noexcept
 {
     return *reinterpret_cast<volatile std::uint16_t *>(0x40001018u);
 }
-inline volatile std::uint16_t &pin_alternate_high() noexcept
-{
-    return *reinterpret_cast<volatile std::uint16_t *>(0x4000101Au);
-}
-
 inline constexpr std::uint8_t kSafeAccessSig1 = 0x57;
 inline constexpr std::uint8_t kSafeAccessSig2 = 0xA8;
 inline constexpr std::uint8_t kClockPllOn = 0x10;
@@ -255,6 +238,13 @@ public:
 private:
     std::uint32_t m_state;
 };
+
+// Clear the watchdog reset enables left set by the reset defaults.
+inline void disable_watchdog_reset() noexcept
+{
+    SafeAccess access;
+    reset_watchdog_ctrl() &= ~0x06u;
+}
 
 } // namespace sysreg
 
@@ -317,14 +307,6 @@ inline volatile std::uint32_t &dir_reg() noexcept
 {
     return *reinterpret_cast<volatile std::uint32_t *>(0x400010A0u);
 }
-inline volatile std::uint32_t &pin_reg() noexcept
-{
-    return *reinterpret_cast<volatile std::uint32_t *>(0x400010A4u);
-}
-inline volatile std::uint32_t &out_reg() noexcept
-{
-    return *reinterpret_cast<volatile std::uint32_t *>(0x400010A8u);
-}
 inline volatile std::uint32_t &clear_reg() noexcept
 {
     return *reinterpret_cast<volatile std::uint32_t *>(0x400010ACu);
@@ -372,7 +354,6 @@ inline volatile std::uint16_t &ep1_dma() noexcept { return at<std::uint16_t>(0x1
 inline volatile std::uint16_t &ep2_dma() noexcept { return at<std::uint16_t>(0x18); }
 inline volatile std::uint8_t &ep0_t_len() noexcept { return at<std::uint8_t>(0x20); }
 inline volatile std::uint8_t &ep0_ctrl() noexcept { return at<std::uint8_t>(0x22); }
-inline volatile std::uint8_t &ep1_t_len() noexcept { return at<std::uint8_t>(0x24); }
 inline volatile std::uint8_t &ep1_ctrl() noexcept { return at<std::uint8_t>(0x26); }
 inline volatile std::uint8_t &ep2_t_len() noexcept { return at<std::uint8_t>(0x28); }
 inline volatile std::uint8_t &ep2_ctrl() noexcept { return at<std::uint8_t>(0x2A); }
@@ -394,7 +375,6 @@ inline constexpr std::uint8_t kMaskUisToken = 0x30;
 inline constexpr std::uint8_t kMaskUisEndp = 0x0F;
 inline constexpr std::uint8_t kUisTokenOut = 0x00;
 inline constexpr std::uint8_t kUisTokenIn = 0x20;
-inline constexpr std::uint8_t kUisTokenSetup = 0x30;
 inline constexpr std::uint8_t kUifNak = 0x80;
 inline constexpr std::uint8_t kUcResetSie = 0x04;
 inline constexpr std::uint8_t kUdaGpBit = 0x80;
@@ -486,7 +466,6 @@ namespace rfend {
 inline constexpr std::size_t Control = 0x04;
 inline constexpr std::size_t Control2 = 0x08;
 inline constexpr std::size_t Control3 = 0x0C;
-inline constexpr std::size_t Channel = 0x10;
 inline constexpr std::size_t PhyConfig = 0x34;
 inline constexpr std::size_t TxBias = 0x28;
 inline constexpr std::size_t TxControl = 0x2C;

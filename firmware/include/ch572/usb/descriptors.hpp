@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "ch572/usb/usb_common.hpp"
+
 namespace ch572::usb {
 
 struct __attribute__((packed)) LineCoding
@@ -65,6 +67,13 @@ inline constexpr std::uint8_t kSerialDescriptor[] = {
     0x1A, 0x03,
     'W', 0x00, 'C', 0x00, 'H', 0x00, '4', 0x00, '5', 0x00, '4', 0x00,
     '5', 0x00, '4', 0x00, '5', 0x00, 'T', 0x00, 'S', 0x00, '2', 0x00,
+};
+
+inline constexpr DescriptorSet kDescriptors = {
+    kDeviceDescriptor,
+    kConfigDescriptor,
+    kQualifierDescriptor,
+    {kLanguageDescriptor, kManufacturerDescriptor, kProductDescriptor, kSerialDescriptor},
 };
 
 } // namespace ch572::usb

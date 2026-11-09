@@ -7,14 +7,15 @@
 
 namespace ch572::rf {
 
-using Status = std::uint8_t;
-using RoleState = std::uint32_t;
-using ProcessCallback = void (*)(RoleState state);
+using RoleEvent = std::uint32_t;
+using ProcessCallback = void (*)(RoleEvent event);
 
-inline constexpr std::uint32_t kStateRx = 1u << 0;
-inline constexpr std::uint32_t kStateTimeout = 1u << 2;
-inline constexpr std::uint32_t kStateCrcError = 1u << 3;
-inline constexpr std::uint32_t kStateTxFinish = 1u << 4;
+// Events reported to the role callback. These are deliberately independent
+// from the raw LLE IRQ bits, which are decoded inside rfip.cpp.
+inline constexpr RoleEvent kEventRx = 1u << 0;
+inline constexpr RoleEvent kEventCrcError = 1u << 1;
+inline constexpr RoleEvent kEventTxFinish = 1u << 2;
+inline constexpr RoleEvent kEventTimeout = 1u << 3;
 
 inline constexpr std::uint32_t kPhyModeMask = 0x30;
 inline constexpr std::uint32_t kPhyMode1M = 0u << 4;
@@ -40,7 +41,6 @@ inline constexpr std::uint8_t kTxPower6Dbm = 0x2D;
 struct RoleConfig
 {
     ProcessCallback process_cb;
-    std::uint32_t process_mask;
 };
 
 // Layout matches the vendor rfipTx_t/rfipRx_t structures.  Keep the
@@ -89,14 +89,10 @@ static_assert(offsetof(RxParams, rx_max_len) == 25, "vendor ABI");
 static_assert(offsetof(RxParams, time_out) == 28, "vendor ABI");
 static_assert(offsetof(RxParams, crc_poly) == 32, "vendor ABI");
 
-Status role_init(RoleConfig *config) noexcept;
-CH572_HIGH_CODE Status start_tx(TxParams *params) noexcept;
-CH572_HIGH_CODE Status set_rx(RxParams *params) noexcept;
-Status stop() noexcept;
-Status shutdown() noexcept;
-void calibration() noexcept;
-void wakeup_reg_init() noexcept;
-CH572_HIGH_CODE std::uint8_t read_crc() noexcept;
+void role_init(RoleConfig *config) noexcept;
+CH572_HIGH_CODE void start_tx(TxParams *params) noexcept;
+CH572_HIGH_CODE void set_rx(RxParams *params) noexcept;
+void shutdown() noexcept;
 
 CH572_HIGH_CODE void lle_irq_handler() noexcept;
 CH572_HIGH_CODE void bb_irq_handler() noexcept;

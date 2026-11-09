@@ -19,10 +19,7 @@ int main()
 {
     using namespace ch572;
 
-    {
-        sysreg::SafeAccess access;
-        sysreg::reset_watchdog_ctrl() &= ~0x06u;
-    }
+    sysreg::disable_watchdog_reset();
 
     hal::Led led;
     led.init();
@@ -68,12 +65,6 @@ int main()
     rf.init();
 
     std::uint32_t last_blink = systick::now();
-    bool usb_ready = false;
-
-    // If the application cannot get its USB enumerated, reboot into the IAP
-    // bootloader so the board is always reachable over USB without a power
-    // cycle or the debug link.
-    std::uint32_t last_enumerated = systick::now();
 
     for (;;)
     {
@@ -84,32 +75,16 @@ int main()
         {
             iap::jump();
         }
-        if (usb.enumerated())
-        {
-            last_enumerated = systick::now();
-        }
-        else if ((systick::now() - last_enumerated) > kIapFallbackTicks)
-        {
-            iap::jump();
-        }
 
         const std::uint32_t now = systick::now();
         if (usb.enumerated())
         {
-            if (!usb_ready)
-            {
-                usb_ready = true;
-                led.on();
-            }
+            led.on();
         }
-        else
+        else if ((now - last_blink) >= kBlinkTicks)
         {
-            usb_ready = false;
-            if ((now - last_blink) >= kBlinkTicks)
-            {
-                last_blink = now;
-                led.toggle();
-            }
+            last_blink = now;
+            led.toggle();
         }
     }
 }
