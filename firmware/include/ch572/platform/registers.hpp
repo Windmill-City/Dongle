@@ -173,8 +173,6 @@ inline volatile std::uint8_t &reset_status() noexcept
 }
 // Independent watchdog (IWDT): runs from the 32 kHz LSI, 4..512 prescaler,
 // 12-bit reload.  timeout = prescaler * reload / 32768 s.
-// The R8_WDOG_COUNT above counts at Fsys/131072 (8-bit), so at 100 MHz it can
-// only reach ~0.33 s; use the IWDT whenever a longer timeout is needed.
 inline volatile std::uint32_t &iwdg_key() noexcept
 {
     return *reinterpret_cast<volatile std::uint32_t *>(0x40001000u);

@@ -34,7 +34,6 @@ int main()
 
     sysreg::iwdg_start_5s();
 
-
     auto &usb = usb::Ch341Serial::instance();
     usb.init();
 

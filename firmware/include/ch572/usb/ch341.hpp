@@ -95,5 +95,3 @@ private:
 };
 
 } // namespace ch572::usb
-
-// The IRQ entry point is declared in the application translation unit.

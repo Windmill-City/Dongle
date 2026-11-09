@@ -257,7 +257,6 @@ void IspDevice::handle_setup() noexcept
         return;
     }
 
-    // Data-stage requests filled data_length above; control requests left it 0.
     usbreg::ep0_t_len() = data_length;
     usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
                          usbreg::kUepRResAck | usbreg::kUepTResAck;

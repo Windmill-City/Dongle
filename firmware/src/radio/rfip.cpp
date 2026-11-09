@@ -6,7 +6,6 @@
 
 namespace ch572::rf {
 
-
 namespace {
 
 using radio_reg::Bb;

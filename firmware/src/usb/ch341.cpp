@@ -20,8 +20,8 @@ constexpr std::uint8_t kRequestGetVersion = 0x5F;
 // jump or a bootloader update.
 constexpr std::uint8_t kRequestIapControl = 0xB1;
 constexpr std::uint8_t kIapMarker = 0x5A;
-constexpr std::uint8_t kIapTokenLow = 0x41;  // "AI"
-constexpr std::uint8_t kIapTokenHigh = 0x49; // "I"
+constexpr std::uint8_t kIapTokenLow = 0x41;
+constexpr std::uint8_t kIapTokenHigh = 0x49;
 constexpr std::uint8_t kIapCommandJump = 0x01;
 constexpr std::uint8_t kIapCommandBoot = 0x02;
 

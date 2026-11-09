@@ -62,7 +62,7 @@ CH572_HIGH_CODE void init_100mhz() noexcept
         sysreg::SafeAccess access;
         sysreg::sleep_power_ctrl() |= kPowerPlanEnable;
         sysreg::clock_sys_cfg() = kPll100MHz;
-        // CH570Q SetSysClock(): 7,7 trims (check the CH572 SDK value separately).
+        // 7,7 trims from the CH570Q SetSysClock().
         sysreg::misc_ctrl() |= (7u << 3) | (7u << 6);
     }
 }

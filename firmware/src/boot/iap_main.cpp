@@ -30,9 +30,6 @@ void blink(int count) noexcept
 
 } // namespace
 
-// Only the time-critical ISP paths (IspDevice) are copied to RAM. main itself
-// stays in flash: the USB setup handling that must beat the host's timeout
-// runs from the highcode ISR, so the loop body here is not critical.
 int main()
 {
     using namespace ch572;
@@ -64,13 +61,6 @@ int main()
 
     systick::start(6400u); // reset-default 6.4 MHz
 
-    // Leave for the application before touching the clock or the debug pins.
-    // The app runs its own SetSysClock(); initialising the PLL here and then
-    // again in the app hangs the second PLL setup.
-    //
-    // Set the flag to IAP before handing over: the application clears it with
-    // app_ok() once it is running. If it resets before that, the next boot
-    // stays in ISP instead of looping in a broken application.
     if (!iap::requested())
     {
         iap::request();
