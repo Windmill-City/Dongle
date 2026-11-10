@@ -26,8 +26,8 @@ void dev_init() noexcept
 {
     RfEnd::r32(off::TxBias)        = 1152;
     RfEnd::r32(off::Power)         = (RfEnd::r32(off::Power) & 0xFFFF0FFFu) | 0x00008000u;
-    RfEnd::r32(off::TxControl1)     = (RfEnd::r32(off::TxControl1) & 0xFFFFCFFFu) | 0x00001000u;
-    RfEnd::r32(off::TxControl1)     = (RfEnd::r32(off::TxControl1) & 0xFFFCFFFFu) | 0x00010000u;
+    RfEnd::r32(off::TxControl1)    = (RfEnd::r32(off::TxControl1) & 0xFFFFCFFFu) | 0x00001000u;
+    RfEnd::r32(off::TxControl1)    = (RfEnd::r32(off::TxControl1) & 0xFFFCFFFFu) | 0x00010000u;
     RfEnd::r32(off::Power)         = (RfEnd::r32(off::Power) & 0xF8FFFFFFu) | 0x20000000u;
     RfEnd::r32(off::Power)         = (RfEnd::r32(off::Power) & 0x1FFFFFFFu) | 0x00040000u;
     RfEnd::r32(off::TxControl2)    = RfEnd::r32(off::TxControl2) & 0xFFF9FFFFu;
