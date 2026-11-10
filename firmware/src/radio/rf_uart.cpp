@@ -26,10 +26,6 @@ void RfUart::on_status(rf::Event event) noexcept
     }
 
     auto* self = g_instance;
-    if ((event & rf::kEventRx) != 0)
-    {
-        self->process_rx(&self->m_rx.packet);
-    }
     if ((event & rf::kEventEr) != 0 && !self->m_tx_in_flight)
     {
         self->start_rx();
@@ -37,6 +33,10 @@ void RfUart::on_status(rf::Event event) noexcept
     if ((event & rf::kEventTx) != 0)
     {
         self->process_tx();
+    }
+    if ((event & rf::kEventRx) != 0)
+    {
+        self->process_rx(&self->m_rx.packet);
     }
 }
 
