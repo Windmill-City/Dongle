@@ -52,7 +52,7 @@ void UsbDevice::init()
 {
     sysreg::pin_alternate() &= ~sysreg::kPinDebugEnable;
     m_app_update_request = false;
-    m_boot_update_request = false;
+    m_iap_update_request = false;
     m_hid_report_pending = false;
     m_hid_status = kHidStatusOk;
     m_hid_command = 0;
@@ -404,7 +404,7 @@ void UsbDevice::handle_hid_report(std::uint8_t length)
                 status = kHidStatusOk;
                 break;
             case kIapCommandBootUpdate:
-                m_boot_update_request = true;
+                m_iap_update_request = true;
                 status = kHidStatusOk;
                 break;
             default:

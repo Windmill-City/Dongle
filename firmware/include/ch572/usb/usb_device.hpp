@@ -47,7 +47,7 @@ public:
     const LineCoding &line_coding() const noexcept { return m_line_coding; }
     bool enumerated() const noexcept { return (usbreg::dev_addr() & 0x7Fu) != 0; }
     bool app_update_requested() const noexcept { return m_app_update_request; }
-    bool boot_update_requested() const noexcept { return m_boot_update_request; }
+    bool iap_update_requested() const noexcept { return m_iap_update_request; }
 
 private:
     UsbDevice() = default;
@@ -87,7 +87,7 @@ private:
     RingBuffer<kUsbBufferSize> m_rx_buffer;
     ByteSource *m_source = nullptr;
     volatile bool m_app_update_request = false;
-    volatile bool m_boot_update_request = false;
+    volatile bool m_iap_update_request = false;
     volatile bool m_hid_report_pending = false;
     std::uint8_t m_hid_status = 0;
     std::uint8_t m_hid_command = 0;

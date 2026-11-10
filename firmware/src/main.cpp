@@ -58,7 +58,7 @@ int main()
             iap::jump();
         }
 
-        if (usb.boot_update_requested())
+        if (usb.iap_update_requested())
         {
             rf::shutdown();
             disable_irq(Irq::BleBb);
