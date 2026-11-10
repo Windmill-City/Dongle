@@ -8,6 +8,7 @@ namespace ch572::clock
 namespace
 {
 
+// 100MHz
 constexpr std::uint8_t kSysClockSelectHse = 0xC0;
 constexpr std::uint8_t kSysClockSelectPll = 0x40;
 constexpr std::uint8_t kPll100MHz         = kSysClockSelectPll | 6;
@@ -18,7 +19,7 @@ constexpr std::uint8_t kHseCapacitanceP8  = 0x10;
 
 } // namespace
 
-CH572_HIGH_CODE void init_100mhz() noexcept
+CH572_HIGH_CODE void init() noexcept
 {
     {
         sysreg::SafeAccess access;

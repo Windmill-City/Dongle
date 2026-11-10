@@ -8,7 +8,7 @@ int main()
     using namespace ch572;
 
     sysreg::disable_watchdog_reset();
-    clock::init_100mhz();
+    clock::init();
 
     auto& usb = usb::UsbDevice::instance();
     usb.init();
