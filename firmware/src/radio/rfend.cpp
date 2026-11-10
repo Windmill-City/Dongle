@@ -14,17 +14,14 @@ namespace lle                               = radio_reg::lle;
 
 // The LLE countdown timer runs at 2 MHz on CH570/CH572.
 constexpr std::uint32_t kTimerTicksPerUs    = 2;
-constexpr std::uint32_t kFilterTimeoutTicks = 100; // 50 us at 2 MHz
+constexpr std::uint32_t kFilterTimeoutTicks = 50 * kTimerTicksPerUs;
 constexpr std::uint32_t kTuneTimeoutTicks   = 4000u * kTimerTicksPerUs;
+constexpr std::uint32_t kInitSettleTicks    = 3 * kTimerTicksPerUs;
 
 // Vendor tuning points: 2401, 2480 and 2440 MHz.
 constexpr std::uint16_t kTuneCycle2401      = 191;
 constexpr std::uint16_t kTuneCycle2480      = 231;
 constexpr std::uint16_t kTuneCycle2440      = 211;
-
-// The vendor uses a short nop loop after enabling the TX bias. The LLE timer
-// is already clocked at reset, so use it to express the same settling delay.
-constexpr std::uint32_t kInitSettleTicks    = 6; // ~3 us at 2 MHz
 
 struct TxTunePoint
 {
