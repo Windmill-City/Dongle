@@ -10,7 +10,6 @@
 - 主机轮询式链路：只有 REQ/RSP 两种包，长度 0 表示 poll/ACK；设备回显
   `sequence`，重复请求重发上一次响应。
 - CDC line coding 不再经 RF 转发，本地固定回 115200 8N1。
-- 板载 LED：USB 未枚举时 500 ms 闪烁，枚举成功后常亮。
 - 100 MHz 系统时钟（32 MHz HSE + PLL）。
 - 直接从 `0x00000000` 启动，不包含引导程序；重新烧录使用 SWD 或 ISP。
 
@@ -22,12 +21,12 @@ firmware/
 ├─ ld/ch572.ld         链接脚本（Makefile 传入 Flash 窗口）
 ├─ include/ch572/
 │  ├─ compiler.hpp
-│  ├─ platform/       寄存器、中断、时钟、SysTick
+│  ├─ platform/       寄存器、中断、时钟
 │  ├─ usb/            USB 设备、CDC-ACM 描述符
 │  ├─ radio/          RFIP/RFRole、RFEND 校准、RF UART 协议
 │  └─ util/           环形缓冲区
 ├─ src/
-│  ├─ platform/       启动代码、时钟、SysTick
+│  ├─ platform/       启动代码、时钟
 │  ├─ usb/
 │  ├─ radio/
 │  └─ main.cpp
@@ -37,11 +36,11 @@ firmware/
 
 - `platform/`：只包含芯片寄存器访问和最小驱动，不依赖应用逻辑。
 - `usb/`：`UsbDevice` 负责 USB 设备枚举、CDC-ACM 数据端点和收发缓冲；
-  `ByteSource` 接口把“向主机发送”的数据源解耦。
+  直接把 `RfUart` 作为发送数据源。
 - `radio/rfend.*`：RFEND 校准/调谐逻辑的源码实现。
 - `radio/rfip.*`：RFIP/RFRole 前端的源码实现，`TxParams`/`RxParams`
   保持与原始接口一致的结构布局。
-- `radio/rf_uart.*`：固定地址/信道的透传协议，实现 `usb::ByteSource`。
+- `radio/rf_uart.*`：固定地址/信道的透传协议。
 - `main.cpp`：组合根，只负责初始化顺序和主循环。
 
 ## 数据通路
@@ -54,7 +53,7 @@ RF REQ -> RfUart::process_rx
        -> RF RSP payload (USB -> RF)
 
 RF REQ payload -> RfUart::process_rx -> RingBuffer<256>
-               -> UsbDevice::poll (ByteSource)
+               -> UsbDevice::poll (RfUart::read)
                -> USB IN (EP2)
 ```
 
@@ -82,7 +81,8 @@ make clean      # 清理构建输出
 2.4 GHz 收发时序全部位于 `src/radio/`：
 
 - `rfip.cpp`：接入地址、CRC、固定 2 Mbps PHY、收发启动、IRQ 处理。
-- `rfend.cpp`：TX 电容/增益校准、RX 滤波器与 ADC 校准、调谐等待逻辑。
+- `rfend.cpp`：固定 2440 MHz 单点 TX 电容校准、RX 滤波器与 ADC 校准、
+  调谐等待逻辑。
 - `rf_uart.cpp`：固定地址/信道、REQ/RSP、序号/ACK 和双向透传。
 
 上述实现已经通过编译和结构布局检查，但当前环境没有硬件，射频行为仍需
@@ -95,7 +95,7 @@ make clean      # 清理构建输出
 | USB VBUS | V5 | 5 V 供电，内部 LDO 3.3 V |
 | USB D- | PA0 | UDM |
 | USB D+ | PA1 | UDP，内部 1.5k 上拉 |
-| LED | PA7 | 高电平点亮 |
+| LED | PA7 | 未使用 |
 | 32 MHz 晶体 | XI/XO | HSE + PLL 100 MHz |
 
 ## 烧录
@@ -126,7 +126,7 @@ CH340/USB-TTL 接线：
 
 | 目标 | Flash | RAM |
 |------|-------|-----|
-| `rf_uart_app` | 6620 B（约 6.5 KiB） | 3684 B（约 3.6 KiB） |
+| `rf_uart_app` | 5732 B（约 5.6 KiB） | 3624 B（约 3.5 KiB） |
 
 - Flash 可用 240 KiB，RAM 为 12 KiB。
 

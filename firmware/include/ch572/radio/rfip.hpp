@@ -64,7 +64,6 @@ struct RxParams
 void role_init(RoleConfig *config) noexcept;
 CH572_HIGH_CODE void start_tx(TxParams *params) noexcept;
 CH572_HIGH_CODE void set_rx(RxParams *params) noexcept;
-void shutdown() noexcept;
 
 CH572_HIGH_CODE void lle_irq_handler() noexcept;
 CH572_HIGH_CODE void bb_irq_handler() noexcept;

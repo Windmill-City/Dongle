@@ -42,7 +42,6 @@ private:
 
 enum class Irq : std::uint32_t
 {
-    SysTick = 12,
     GpioA = 17,
     Spi = 19,
     BleBb = 20,
@@ -85,23 +84,9 @@ struct Pfic
     volatile std::uint32_t sctlr;
 };
 
-struct SysTickRegisters
-{
-    volatile std::uint32_t ctlr;
-    volatile std::uint32_t sr;
-    volatile std::uint32_t cntl;
-    std::uint32_t reserved0;
-    volatile std::uint32_t cmpl;
-};
-
 inline Pfic &pfic() noexcept
 {
     return *reinterpret_cast<Pfic *>(0xE000E000u);
-}
-
-inline SysTickRegisters &systick_regs() noexcept
-{
-    return *reinterpret_cast<SysTickRegisters *>(0xE000F000u);
 }
 
 inline void enable_irq(Irq irq) noexcept
@@ -109,13 +94,6 @@ inline void enable_irq(Irq irq) noexcept
     const auto index = static_cast<std::uint32_t>(irq) >> 5;
     const auto bit = 1u << (static_cast<std::uint32_t>(irq) & 0x1Fu);
     pfic().ienr[index] = bit;
-}
-
-inline void disable_irq(Irq irq) noexcept
-{
-    const auto index = static_cast<std::uint32_t>(irq) >> 5;
-    const auto bit = 1u << (static_cast<std::uint32_t>(irq) & 0x1Fu);
-    pfic().irer[index] = bit;
 }
 
 // ---------------------------------------------------------------------------
@@ -168,11 +146,6 @@ inline volatile std::uint8_t &reset_watchdog_ctrl() noexcept
 {
     return *reinterpret_cast<volatile std::uint8_t *>(0x40001046u);
 }
-// R8_RESET_STATUS: bits 0..2 report the most recent reset source.
-inline volatile std::uint8_t &reset_status() noexcept
-{
-    return *reinterpret_cast<volatile std::uint8_t *>(0x40001044u);
-}
 // Independent watchdog (IWDT): runs from the 32 kHz LSI, 4..512 prescaler,
 // 12-bit reload.  timeout = prescaler * reload / 32768 s.
 inline volatile std::uint32_t &iwdg_key() noexcept
@@ -218,11 +191,6 @@ inline constexpr std::uint16_t kPinDebugEnable = 0x4000;
 inline constexpr std::uint16_t kPinUsbEnable = 0x2000;
 inline constexpr std::uint16_t kUdpPullUpEnable = 0x1000;
 inline constexpr std::uint8_t kSoftwareReset = 0x01;
-inline constexpr std::uint8_t kResetFlagMask = 0x07;
-inline constexpr std::uint8_t kResetFlagSoftware = 0x00;
-inline constexpr std::uint8_t kResetFlagPowerOn = 0x01;
-inline constexpr std::uint8_t kResetFlagWatchdog = 0x02;
-inline constexpr std::uint8_t kResetFlagManual = 0x03;
 
 class SafeAccess
 {
@@ -260,35 +228,6 @@ inline void disable_watchdog_reset() noexcept
 [[noreturn]] void software_reset() noexcept;
 
 } // namespace sysreg
-
-// ---------------------------------------------------------------------------
-// GPIO
-// ---------------------------------------------------------------------------
-
-namespace gpio {
-
-inline volatile std::uint32_t &dir_reg() noexcept
-{
-    return *reinterpret_cast<volatile std::uint32_t *>(0x400010A0u);
-}
-inline volatile std::uint32_t &clear_reg() noexcept
-{
-    return *reinterpret_cast<volatile std::uint32_t *>(0x400010ACu);
-}
-inline volatile std::uint32_t &pull_up_reg() noexcept
-{
-    return *reinterpret_cast<volatile std::uint32_t *>(0x400010B0u);
-}
-inline volatile std::uint32_t &pull_down_drive_reg() noexcept
-{
-    return *reinterpret_cast<volatile std::uint32_t *>(0x400010B4u);
-}
-inline volatile std::uint32_t &set_reg() noexcept
-{
-    return *reinterpret_cast<volatile std::uint32_t *>(0x400010B8u);
-}
-
-} // namespace gpio
 
 // ---------------------------------------------------------------------------
 // USB device controller
@@ -334,16 +273,7 @@ inline constexpr std::uint8_t kUifTransfer = 0x02;
 inline constexpr std::uint8_t kUifBusReset = 0x01;
 inline constexpr std::uint8_t kUifSuspend = 0x04;
 inline constexpr std::uint8_t kUisSetupAct = 0x80;
-inline constexpr std::uint8_t kUisTogOk = 0x40;
 inline constexpr std::uint8_t kMaskUisToken = 0x30;
-inline constexpr std::uint8_t kMaskUisEndp = 0x0F;
-inline constexpr std::uint8_t kUisTokenOut = 0x00;
-inline constexpr std::uint8_t kUisTokenIn = 0x20;
-inline constexpr std::uint8_t kUifNak = 0x80;
-inline constexpr std::uint8_t kUcResetSie = 0x04;
-inline constexpr std::uint8_t kUdaGpBit = 0x80;
-inline constexpr std::uint8_t kUepAutoTog = 0x10;
-inline constexpr std::uint8_t kUep1RxEn = 0x80;
 inline constexpr std::uint8_t kUep1TxEn = 0x40;
 inline constexpr std::uint8_t kUep2RxEn = 0x08;
 inline constexpr std::uint8_t kUep2TxEn = 0x04;
@@ -414,12 +344,9 @@ inline constexpr std::size_t Control1 = 0x14;
 inline constexpr std::size_t Control2High = 0x1E;
 inline constexpr std::size_t Control2 = 0x1C;
 inline constexpr std::size_t Control3 = 0x24;
-inline constexpr std::size_t Mode2G4 = 0x26;
 inline constexpr std::size_t TxPower = 0x34;
 inline constexpr std::size_t RxConfig = 0x3C;
 inline constexpr std::size_t CrcStatus = 0x40;
-inline constexpr std::size_t PhyConfig = 0x50;
-inline constexpr std::size_t Length = 0x54;
 inline constexpr std::size_t RxCrcInit = 0x58;
 inline constexpr std::size_t RxCrcPoly = 0x5C;
 inline constexpr std::size_t RxAccessAddress = 0x60;
@@ -436,15 +363,12 @@ inline constexpr std::size_t TxControl = 0x2C;
 inline constexpr std::size_t TxControl2 = 0x30;
 inline constexpr std::size_t DacRef = 0x38;
 inline constexpr std::size_t Power = 0x3C;
-inline constexpr std::size_t ChannelDivider = 0x44;
 inline constexpr std::size_t TuneControl = 0x48;
 inline constexpr std::size_t FilterControl = 0x50;
 inline constexpr std::size_t AdcControl = 0x58;
 inline constexpr std::size_t RxControl = 0x5C;
 inline constexpr std::size_t TuneResult = 0x90;
-inline constexpr std::size_t GainResult = 0x94;
 inline constexpr std::size_t FilterResult = 0x9C;
-inline constexpr std::size_t TxTable0 = 0xA0;
 } // namespace rfend
 
 } // namespace radio_reg

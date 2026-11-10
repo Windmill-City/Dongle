@@ -48,13 +48,13 @@ static_assert(sizeof(Packet) == 2, "RF packet header is two bytes");
 static_assert(offsetof(TxBuffer, payload) == 2, "RF payload is contiguous");
 static_assert(sizeof(TxBuffer) == 68, "RF transmit buffer is header plus payload");
 
-class RfUart final : public usb::ByteSource
+class RfUart final
 {
 public:
     explicit RfUart(usb::UsbDevice &usb) noexcept : m_usb(usb) {}
 
     void init() noexcept;
-    std::size_t read(std::uint8_t *dst, std::size_t max_length) noexcept override;
+    std::size_t read(std::uint8_t *dst, std::size_t max_length) noexcept;
 
 private:
     CH572_HIGH_CODE static void on_status(rf::RoleEvent event) noexcept;

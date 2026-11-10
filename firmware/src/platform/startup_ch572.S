@@ -169,26 +169,6 @@ WDOG_BAT_IRQHandler:
     ori t0, t0, 3
     csrw mtvec, t0
 
-    la s0, __preinit_array_start
-    la s1, __preinit_array_end
-    bgeu s0, s1, .Lpreinit_done
-.Lpreinit_loop:
-    lw t0, 0(s0)
-    jalr ra, t0, 0
-    addi s0, s0, 4
-    bltu s0, s1, .Lpreinit_loop
-.Lpreinit_done:
-
-    la s0, __init_array_start
-    la s1, __init_array_end
-    bgeu s0, s1, .Linit_done
-.Linit_loop:
-    lw t0, 0(s0)
-    jalr ra, t0, 0
-    addi s0, s0, 4
-    bltu s0, s1, .Linit_loop
-.Linit_done:
-
     /* MPP=machine (0x1800): main() runs in machine mode, which is required
        for the machine CSR writes in the platform layer. */
     li t0, 0x1880

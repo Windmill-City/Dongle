@@ -8,16 +8,11 @@
 #include "ch572/usb/descriptors.hpp"
 #include "ch572/util/ring_buffer.hpp"
 
+namespace ch572::rf_uart {
+class RfUart;
+}
+
 namespace ch572::usb {
-
-class ByteSource
-{
-public:
-    virtual std::size_t read(std::uint8_t *dst, std::size_t max_length) = 0;
-
-protected:
-    ~ByteSource() = default;
-};
 
 // USB CDC ACM device exposing the transparent serial stream.
 class UsbDevice
@@ -28,7 +23,7 @@ public:
     void init();
     void poll();
     CH572_HIGH_CODE void irq_handler();
-    void set_source(ByteSource *source) noexcept;
+    void set_source(rf_uart::RfUart *source) noexcept;
 
     CH572_HIGH_CODE std::size_t read_host(void *dst, std::size_t max_length);
     bool enumerated() const noexcept { return (usbreg::dev_addr() & 0x7Fu) != 0; }
@@ -62,7 +57,7 @@ private:
     alignas(4) std::uint8_t m_ep2_buffer[2 * kPacketSize]{};
 
     RingBuffer<kUsbBufferSize> m_rx_buffer;
-    ByteSource *m_source = nullptr;
+    rf_uart::RfUart *m_source = nullptr;
 };
 
 } // namespace ch572::usb

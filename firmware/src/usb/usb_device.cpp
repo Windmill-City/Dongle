@@ -4,16 +4,14 @@
 
 #include "ch572/compiler.hpp"
 #include "ch572/platform/registers.hpp"
+#include "ch572/radio/rf_uart.hpp"
 #include "ch572/usb/usb_common.hpp"
 
 namespace ch572::usb {
 namespace {
 
 // CDC ACM class requests.
-constexpr std::uint8_t kCdcSetLineCoding = 0x20;
 constexpr std::uint8_t kCdcGetLineCoding = 0x21;
-constexpr std::uint8_t kCdcSetControlLineState = 0x22;
-constexpr std::uint8_t kCdcSendBreak = 0x23;
 
 constexpr std::uint8_t kStall = 0xFF;
 constexpr std::uint8_t kTokenOut = 0x00;
@@ -204,32 +202,14 @@ void UsbDevice::handle_setup()
     }
     else if (request_type == kRequestTypeClass)
     {
-        switch (m_setup_request)
+        if (data_direction == 0)
         {
-        case kCdcSetLineCoding:
-            length = data_direction == 0 ? 0 : kStall;
-            break;
-
-        case kCdcGetLineCoding:
-            if (data_direction != 0)
-            {
-                length = static_cast<std::uint8_t>(kCdcLineCodingSize);
-                std::memcpy(m_ep0_buffer, kLineCoding, kCdcLineCodingSize);
-            }
-            else
-            {
-                length = kStall;
-            }
-            break;
-
-        case kCdcSetControlLineState:
-        case kCdcSendBreak:
-            length = data_direction == 0 ? 0 : kStall;
-            break;
-
-        default:
-            length = kStall;
-            break;
+            length = 0;
+        }
+        else
+        {
+            length = static_cast<std::uint8_t>(kCdcLineCodingSize);
+            std::memcpy(m_ep0_buffer, kLineCoding, kCdcLineCodingSize);
         }
     }
     else
@@ -421,7 +401,7 @@ std::size_t UsbDevice::read_host(void *dst, std::size_t max_length)
     return length;
 }
 
-void UsbDevice::set_source(ByteSource *source) noexcept
+void UsbDevice::set_source(rf_uart::RfUart *source) noexcept
 {
     m_source = source;
 }

@@ -22,7 +22,6 @@ inline constexpr std::uint8_t kRequestTypeIn = 0x80;
 inline constexpr std::uint8_t kRequestTypeMask = 0x60;
 inline constexpr std::uint8_t kRequestTypeStandard = 0x00;
 inline constexpr std::uint8_t kRequestTypeClass = 0x20;
-inline constexpr std::uint8_t kRequestTypeVendor = 0x40;
 inline constexpr std::uint8_t kRecipientMask = 0x1F;
 inline constexpr std::uint8_t kRecipientDevice = 0x00;
 inline constexpr std::uint8_t kRecipientEndpoint = 0x02;

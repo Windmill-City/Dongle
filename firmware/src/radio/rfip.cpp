@@ -31,7 +31,6 @@ CH572_HIGH_CODE void rf_basic_process(std::uint32_t raw_irq) noexcept;
 void wakeup_reg_init() noexcept;
 void calibration() noexcept;
 CH572_HIGH_CODE std::uint8_t read_crc() noexcept;
-void stop() noexcept;
 
 inline std::uint32_t read_u32(const void *address) noexcept
 {
@@ -279,32 +278,6 @@ void set_rx(RxParams *params) noexcept
     {
         start_lle_timer(params->time_out, 0x200000u);
     }
-}
-
-namespace {
-
-void stop() noexcept
-{
-    Lle::r32(lle::PhyControl) &= ~0x10u;
-    if ((Lle::r32(lle::Control) & 3u) != 0)
-    {
-        Lle::r32(lle::Control) |= 8u;
-        nop();
-        nop();
-        Lle::r32(lle::PhyControl) =
-            (Lle::r32(lle::PhyControl) & ~0x700u) | 0x500u;
-    }
-}
-
-} // namespace
-
-void shutdown() noexcept
-{
-    stop();
-    Bb::r32(bb::Control) =
-        (Bb::r32(bb::Control) & 0xFFFCFFFFu) | 0x10000u;
-    RfEnd::r32(rfend_reg::Control2) &= 0xFFCDFFFFu;
-    Lle::r32(lle::PhyControl) = 0x000F0080u;
 }
 
 void lle_irq_handler() noexcept

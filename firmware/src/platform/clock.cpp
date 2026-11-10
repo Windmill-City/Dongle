@@ -6,26 +6,24 @@
 namespace ch572::clock {
 namespace {
 
-constexpr std::uint8_t kSysClockSelectMask = 0xC0;
 constexpr std::uint8_t kSysClockSelectHse = 0xC0;
 constexpr std::uint8_t kSysClockSelectPll = 0x40;
 constexpr std::uint8_t kPll100MHz = kSysClockSelectPll | 6;
 constexpr std::uint8_t kPowerPlanEnable = 0x40;
 constexpr std::uint8_t kFlashPllConfig = 0x01;
 constexpr std::uint8_t kFlashSckPll = 1u << 4;
+constexpr std::uint8_t kHseCapacitanceP8 = 0x10;
 
 } // namespace
 
-CH572_HIGH_CODE void set_hse_capacitance(HseCapacitance capacitance) noexcept
-{
-    const auto value = static_cast<std::uint8_t>(capacitance);
-    sysreg::SafeAccess access;
-    const auto tune = sysreg::xt32m_tune();
-    sysreg::xt32m_tune() = static_cast<std::uint8_t>((tune & 0x0Fu) | (value << 4));
-}
-
 CH572_HIGH_CODE void init_100mhz() noexcept
 {
+    {
+        sysreg::SafeAccess access;
+        sysreg::xt32m_tune() =
+            static_cast<std::uint8_t>((sysreg::xt32m_tune() & 0x0Fu) | kHseCapacitanceP8);
+    }
+
     if ((sysreg::hfck_power_ctrl() & sysreg::kClockXt32mOn) == 0)
     {
         const auto saved_tune = sysreg::xt32m_tune();
