@@ -15,10 +15,8 @@ constexpr std::uint8_t kCdcGetLineCoding = 0x21;
 constexpr std::uint8_t kCdcSetControlLineState = 0x22;
 constexpr std::uint8_t kCdcSendBreak = 0x23;
 
+#ifndef IAP_BOOT
 // HID class requests.
-constexpr std::uint8_t kHidGetReport = 0x01;
-constexpr std::uint8_t kHidGetIdle = 0x02;
-constexpr std::uint8_t kHidGetProtocol = 0x03;
 constexpr std::uint8_t kHidSetReport = 0x09;
 constexpr std::uint8_t kHidSetIdle = 0x0A;
 constexpr std::uint8_t kHidSetProtocol = 0x0B;
@@ -31,14 +29,21 @@ constexpr std::uint8_t kHidTokenA = 'A';
 constexpr std::uint8_t kHidTokenP = 'P';
 constexpr std::uint8_t kIapCommandAppUpdate = 0x01;
 constexpr std::uint8_t kIapCommandBootUpdate = 0x02;
-constexpr std::uint8_t kHidStatusOk = 0x00;
-constexpr std::uint8_t kHidStatusInvalid = 0x01;
-constexpr std::uint8_t kHidStatusUnknownCommand = 0x02;
+#endif
 
 constexpr std::uint8_t kStall = 0xFF;
 constexpr std::uint8_t kTokenOut = 0x00;
 constexpr std::uint8_t kTokenIn = 0x20;
 constexpr std::uint8_t kToggleOk = 0x40;
+
+// The RF link runs at a fixed 2 Mbps, so the local CDC line settings are only
+// a formality; report a fixed 115200 8N1 and accept any SET_LINE_CODING.
+constexpr std::uint8_t kLineCoding[kCdcLineCodingSize] = {
+    0x00, 0xC2, 0x01, 0x00, // 115200
+    0x00,                   // one stop bit
+    0x00,                   // no parity
+    0x08,                   // eight data bits
+};
 
 } // namespace
 
@@ -53,17 +58,11 @@ void UsbDevice::init()
     sysreg::pin_alternate() &= ~sysreg::kPinDebugEnable;
     m_app_update_request = false;
     m_iap_update_request = false;
-    m_hid_report_pending = false;
-    m_hid_status = kHidStatusOk;
-    m_hid_command = 0;
-    device_parameters_init();
     endpoint_init();
-    enable_irq(Irq::Usb);
 
     // WCH implements the global interrupt enable in the custom CSR 0x800
     // (PFIC_EnableAllIRQ writes 0x800 = 0x88); mstatus alone does not gate
-    // PFIC interrupts. Without this the USB interrupt never fires, the setup
-    // packet is only handled by the slow flash-resident poll loop, and the
+    // PFIC interrupts. Without this the USB interrupt never fires and the
     // host reports a device-descriptor failure.
     const std::uint32_t kGlobalIrqEnable = 0x88u;
     asm volatile("csrw 0x800, %0" : : "r"(kGlobalIrqEnable) : "memory");
@@ -73,16 +72,14 @@ void UsbDevice::endpoint_init()
 {
     usbreg::ctrl() = 0;
 
-    // EP1 is the CDC ACM notification endpoint, EP2 is the CDC data pair, and
-    // EP3 is the HID interrupt IN endpoint.
+    // EP1 is the CDC ACM notification endpoint and EP2 is the CDC data pair.
+    // There is no HID interrupt endpoint: SET_REPORT arrives on EP0.
     usbreg::ep4_1_mod() = usbreg::kUep1TxEn;
-    usbreg::ep2_3_mod() = usbreg::kUep2RxEn | usbreg::kUep2TxEn |
-                          usbreg::kUep3TxEn;
+    usbreg::ep2_3_mod() = usbreg::kUep2RxEn | usbreg::kUep2TxEn;
 
     usbreg::ep0_dma() = static_cast<std::uint16_t>(reinterpret_cast<std::uintptr_t>(&m_ep0_buffer[0]));
     usbreg::ep1_dma() = static_cast<std::uint16_t>(reinterpret_cast<std::uintptr_t>(&m_ep1_buffer[0]));
     usbreg::ep2_dma() = static_cast<std::uint16_t>(reinterpret_cast<std::uintptr_t>(&m_ep2_buffer[0]));
-    usbreg::ep3_dma() = static_cast<std::uint16_t>(reinterpret_cast<std::uintptr_t>(&m_ep3_buffer[0]));
 
     // EP0 must receive (ACK) so the host's first SETUP (GET_DESCRIPTOR) is
     // accepted. With RX=NAK the packet is rejected and enumeration never
@@ -90,7 +87,6 @@ void UsbDevice::endpoint_init()
     usbreg::ep0_ctrl() = usbreg::kUepRResAck | usbreg::kUepTResNak;
     usbreg::ep1_ctrl() = usbreg::kUepRResAck | usbreg::kUepTResNak;
     usbreg::ep2_ctrl() = usbreg::kUepRResAck | usbreg::kUepTResNak;
-    usbreg::ep3_ctrl() = usbreg::kUepRResNak | usbreg::kUepTResNak;
 
     usbreg::dev_addr() = 0;
     usbreg::dev_ctrl() = usbreg::kUdPdDis;
@@ -104,16 +100,6 @@ void UsbDevice::endpoint_init()
     usbreg::dev_ctrl() |= usbreg::kUdPortEn;
 
     m_device_info = DeviceInfo{};
-}
-
-void UsbDevice::device_parameters_init()
-{
-    m_line_coding.baud_rate = 115200;
-    m_line_coding.data_bits = 8;
-    m_line_coding.parity = 0;
-    m_line_coding.stop_bits = 1;
-    m_line_coding.line_state = 0;
-    m_line_coding_changed = true;
 }
 
 void UsbDevice::handle_setup()
@@ -147,6 +133,7 @@ void UsbDevice::handle_setup()
             const std::uint8_t *descriptor = nullptr;
             std::uint8_t descriptor_length = 0;
 
+#ifndef IAP_BOOT
             if (type == kDescriptorHid)
             {
                 descriptor = kHidDescriptor;
@@ -158,8 +145,9 @@ void UsbDevice::handle_setup()
                 descriptor_length = sizeof(kHidReportDescriptor);
             }
             else
+#endif
             {
-                descriptor = find_descriptor(kDescriptors, type, setup->value_l);
+                descriptor = find_descriptor(kDescriptors, type);
                 if (descriptor != nullptr)
                 {
                     descriptor_length = descriptor[0];
@@ -206,7 +194,6 @@ void UsbDevice::handle_setup()
             {
                 usbreg::ep1_ctrl() = (usbreg::ep1_ctrl() & ~(usbreg::kUepTTog | usbreg::kMaskUepTRes)) | usbreg::kUepTResNak;
                 usbreg::ep2_ctrl() = (usbreg::ep2_ctrl() & ~(usbreg::kUepTTog | usbreg::kMaskUepTRes)) | usbreg::kUepTResNak;
-                usbreg::ep3_ctrl() = (usbreg::ep3_ctrl() & ~(usbreg::kUepTTog | usbreg::kMaskUepTRes)) | usbreg::kUepTResNak;
             }
             else if ((setup->request_type & kRecipientMask) == kRecipientEndpoint)
             {
@@ -220,9 +207,6 @@ void UsbDevice::handle_setup()
                     break;
                 case 0x81:
                     usbreg::ep1_ctrl() = (usbreg::ep1_ctrl() & ~(usbreg::kUepTTog | usbreg::kMaskUepTRes)) | usbreg::kUepTResNak;
-                    break;
-                case 0x83:
-                    usbreg::ep3_ctrl() = (usbreg::ep3_ctrl() & ~(usbreg::kUepTTog | usbreg::kMaskUepTRes)) | usbreg::kUepTResNak;
                     break;
                 default:
                     length = kStall;
@@ -256,59 +240,15 @@ void UsbDevice::handle_setup()
     }
     else if (request_type == kRequestTypeClass)
     {
+#ifndef IAP_BOOT
         if (setup->index_l == kHidInterface)
         {
             switch (m_setup_request)
             {
-            case kHidGetReport:
-                if (data_direction != 0)
-                {
-                    length = static_cast<std::uint8_t>(kHidTransferSize);
-                    m_ep0_buffer[0] = kHidStatusReportId;
-                    m_ep0_buffer[1] = m_hid_status;
-                    m_ep0_buffer[2] = m_hid_command;
-                    for (std::size_t i = 3; i < kHidTransferSize; ++i)
-                    {
-                        m_ep0_buffer[i] = 0;
-                    }
-                }
-                else
-                {
-                    length = kStall;
-                }
-                break;
-
             case kHidSetReport:
-                length = data_direction == 0 ? 0 : kStall;
-                break;
-
-            case kHidGetIdle:
-                if (data_direction != 0)
-                {
-                    m_ep0_buffer[0] = 0;
-                    length = 1;
-                }
-                else
-                {
-                    length = kStall;
-                }
-                break;
-
             case kHidSetIdle:
             case kHidSetProtocol:
                 length = data_direction == 0 ? 0 : kStall;
-                break;
-
-            case kHidGetProtocol:
-                if (data_direction != 0)
-                {
-                    m_ep0_buffer[0] = 1;
-                    length = 1;
-                }
-                else
-                {
-                    length = kStall;
-                }
                 break;
 
             default:
@@ -317,6 +257,7 @@ void UsbDevice::handle_setup()
             }
         }
         else
+#endif
         {
             switch (m_setup_request)
             {
@@ -328,7 +269,7 @@ void UsbDevice::handle_setup()
                 if (data_direction != 0)
                 {
                     length = static_cast<std::uint8_t>(kCdcLineCodingSize);
-                    std::memcpy(m_ep0_buffer, &m_line_coding, kCdcLineCodingSize);
+                    std::memcpy(m_ep0_buffer, kLineCoding, kCdcLineCodingSize);
                 }
                 else
                 {
@@ -337,18 +278,6 @@ void UsbDevice::handle_setup()
                 break;
 
             case kCdcSetControlLineState:
-                if (data_direction == 0)
-                {
-                    m_line_coding.line_state = setup->value_l & 0x03u;
-                    m_line_coding_changed = true;
-                    length = 0;
-                }
-                else
-                {
-                    length = kStall;
-                }
-                break;
-
             case kCdcSendBreak:
                 length = data_direction == 0 ? 0 : kStall;
                 break;
@@ -381,55 +310,36 @@ void UsbDevice::handle_setup()
                          rx_response | usbreg::kUepTResAck;
 }
 
+#ifndef IAP_BOOT
 void UsbDevice::handle_hid_report(std::uint8_t length)
 {
-    std::uint8_t status = kHidStatusInvalid;
-    std::uint8_t command = 0;
-
-    if (length >= 6 && m_ep0_buffer[0] == kHidReportId)
+    if (length < 6 || m_ep0_buffer[0] != kHidReportId)
     {
-        command = m_ep0_buffer[1];
-        const bool valid =
-            m_ep0_buffer[2] == kHidMarker &&
-            m_ep0_buffer[3] == kHidTokenI &&
-            m_ep0_buffer[4] == kHidTokenA &&
-            m_ep0_buffer[5] == kHidTokenP;
-
-        if (valid)
-        {
-            switch (command)
-            {
-            case kIapCommandAppUpdate:
-                m_app_update_request = true;
-                status = kHidStatusOk;
-                break;
-            case kIapCommandBootUpdate:
-                m_iap_update_request = true;
-                status = kHidStatusOk;
-                break;
-            default:
-                status = kHidStatusUnknownCommand;
-                break;
-            }
-        }
+        return;
     }
 
-    queue_hid_status(status, command);
-}
+    const std::uint8_t command = m_ep0_buffer[1];
+    const bool valid =
+        m_ep0_buffer[2] == kHidMarker &&
+        m_ep0_buffer[3] == kHidTokenI &&
+        m_ep0_buffer[4] == kHidTokenA &&
+        m_ep0_buffer[5] == kHidTokenP;
 
-void UsbDevice::queue_hid_status(std::uint8_t status, std::uint8_t command)
-{
-    m_hid_status = status;
-    m_hid_command = command;
-    m_ep3_buffer[0] = kHidStatusReportId;
-    m_ep3_buffer[1] = status;
-    m_ep3_buffer[2] = command;
-    for (std::size_t i = 3; i < kHidTransferSize; ++i)
+    if (!valid)
     {
-        m_ep3_buffer[i] = 0;
+        return;
     }
-    m_hid_report_pending = true;
+
+    if (command == kIapCommandAppUpdate)
+    {
+        m_app_update_request = true;
+    }
+    else if (command == kIapCommandBootUpdate)
+    {
+        m_iap_update_request = true;
+    }
 }
+#endif
 
 void UsbDevice::irq_handler()
 {
@@ -466,31 +376,17 @@ void UsbDevice::irq_handler()
                 usbreg::ep1_ctrl() = (usbreg::ep1_ctrl() & 0xFCu) | kInNak;
                 break;
 
-            case kTokenIn | 3:
-                usbreg::ep3_ctrl() ^= usbreg::kUepTTog;
-                usbreg::ep3_ctrl() = (usbreg::ep3_ctrl() & ~usbreg::kMaskUepTRes) | kInNak;
-                break;
-
             case kTokenOut | 0:
                 if (toggle_ok)
                 {
-                    usbreg::ep0_ctrl() = (usbreg::ep0_ctrl() & 0xF3u) | 0x08u;
-                    if (length != 0 && m_setup_type == kRequestTypeClass &&
-                        m_setup_request == kCdcSetLineCoding &&
-                        length >= kCdcLineCodingSize)
+                    if (length != 0 && m_setup_type == kRequestTypeClass)
                     {
-                        std::memcpy(&m_line_coding.baud_rate, m_ep0_buffer, 4);
-                        m_line_coding.stop_bits = m_ep0_buffer[4];
-                        m_line_coding.parity = m_ep0_buffer[5];
-                        m_line_coding.data_bits = m_ep0_buffer[6];
-                        m_line_coding_changed = true;
-                        usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
-                                             usbreg::kUepRResNak | usbreg::kUepTResAck;
-                    }
-                    else if (length != 0 && m_setup_type == kRequestTypeClass &&
-                             m_setup_request == kHidSetReport)
-                    {
-                        handle_hid_report(length);
+#ifndef IAP_BOOT
+                        if (m_setup_request == kHidSetReport)
+                        {
+                            handle_hid_report(length);
+                        }
+#endif
                         usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
                                              usbreg::kUepRResNak | usbreg::kUepTResAck;
                     }
@@ -531,10 +427,8 @@ void UsbDevice::irq_handler()
         usbreg::ep0_ctrl() = usbreg::kUepRResAck | usbreg::kUepTResNak;
         usbreg::ep1_ctrl() = usbreg::kUepRResAck | usbreg::kUepTResNak;
         usbreg::ep2_ctrl() = usbreg::kUepRResAck | usbreg::kUepTResNak;
-        usbreg::ep3_ctrl() = usbreg::kUepRResNak | usbreg::kUepTResNak;
         usbreg::dev_addr() = 0;
         m_device_info.address = 0;
-        m_hid_report_pending = false;
         usbreg::int_fg() = usbreg::kUifBusReset;
     }
     else if ((usbreg::int_fg() & usbreg::kUifSuspend) != 0)
@@ -545,31 +439,11 @@ void UsbDevice::irq_handler()
 
 void UsbDevice::handle_ep0_in()
 {
-    if (m_setup_type == kRequestTypeClass)
+    if (m_setup_type == kRequestTypeClass && m_setup_request == kCdcGetLineCoding)
     {
-        switch (m_setup_request)
-        {
-        case kCdcGetLineCoding:
-        case kHidGetReport:
-        case kHidGetIdle:
-        case kHidGetProtocol:
-            usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
-                                 usbreg::kUepRResAck | usbreg::kUepTResNak;
-            return;
-
-        case kCdcSetLineCoding:
-        case kCdcSetControlLineState:
-        case kCdcSendBreak:
-        case kHidSetReport:
-        case kHidSetIdle:
-        case kHidSetProtocol:
-            usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
-                                 usbreg::kUepRResNak | usbreg::kUepTResNak;
-            return;
-
-        default:
-            break;
-        }
+        usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
+                             usbreg::kUepRResAck | usbreg::kUepTResNak;
+        return;
     }
 
     switch (m_setup_request)
@@ -617,20 +491,11 @@ void UsbDevice::poll()
         return;
     }
 
-    if (m_hid_report_pending &&
-        (usbreg::ep3_ctrl() & usbreg::kMaskUepTRes) == usbreg::kUepTResNak)
-    {
-        usbreg::ep3_t_len() = static_cast<std::uint8_t>(kHidTransferSize);
-        usbreg::ep3_ctrl() = (usbreg::ep3_ctrl() & ~usbreg::kMaskUepTRes) |
-                             usbreg::kUepTResAck;
-        m_hid_report_pending = false;
-    }
-
     if ((usbreg::ep2_ctrl() & usbreg::kMaskUepTRes) == usbreg::kUepTResNak)
     {
         if (m_source != nullptr)
         {
-            std::uint8_t length = static_cast<std::uint8_t>(kPacketSize / 2);
+            std::uint8_t length = static_cast<std::uint8_t>(kPacketSize);
             const std::size_t available =
                 m_source->read(&m_ep2_buffer[kPacketSize], length);
             if (available != 0)
@@ -642,25 +507,19 @@ void UsbDevice::poll()
     }
 }
 
-HostReadResult UsbDevice::read_host(void *dst, std::size_t max_length)
+std::size_t UsbDevice::read_host(void *dst, std::size_t max_length)
 {
-    if (enumerated() && m_line_coding_changed)
+    if (m_rx_buffer.empty())
     {
-        m_line_coding_changed = false;
-        return {HostReadStatus::line_coding_changed, 0};
+        return 0;
     }
 
-    if (!m_rx_buffer.empty())
+    const std::size_t length = m_rx_buffer.read(dst, max_length);
+    if (m_rx_buffer.size() < (kUsbBufferSize - kPacketSize))
     {
-        const std::size_t length = m_rx_buffer.read(dst, max_length);
-        if (m_rx_buffer.size() < (kUsbBufferSize - kPacketSize))
-        {
-            usbreg::ep2_ctrl() = (usbreg::ep2_ctrl() & ~usbreg::kMaskUepRRes) | usbreg::kUepRResAck;
-        }
-        return {HostReadStatus::data, length};
+        usbreg::ep2_ctrl() = (usbreg::ep2_ctrl() & ~usbreg::kMaskUepRRes) | usbreg::kUepRResAck;
     }
-
-    return {HostReadStatus::no_data, 0};
+    return length;
 }
 
 void UsbDevice::set_source(ByteSource *source) noexcept

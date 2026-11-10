@@ -41,19 +41,31 @@ constexpr std::uint16_t kMaxPayload = 128u;
 class ResponseSource final : public usb::ByteSource
 {
 public:
+    void reset() noexcept { m_pending = false; }
+
     void push(std::uint8_t value) noexcept
     {
-        m_ring.write(&value, 1u);
+        m_value = value;
+        m_pending = true;
     }
 
     std::size_t read(std::uint8_t *dst, std::size_t max_length) noexcept override
     {
-        return m_ring.read(dst, max_length);
+        if (!m_pending || max_length == 0)
+        {
+            return 0;
+        }
+        *dst = m_value;
+        m_pending = false;
+        return 1;
     }
 
 private:
-    RingBuffer<16> m_ring;
+    std::uint8_t m_value = 0;
+    bool m_pending = false;
 };
+
+ResponseSource g_source;
 
 std::uint32_t read_le32(const std::uint8_t *data) noexcept
 {
@@ -77,12 +89,55 @@ std::uint32_t crc32(const std::uint8_t *data, std::uint32_t length) noexcept
     return ~crc;
 }
 
+[[noreturn]] CH572_HIGH_CODE void copy_boot(std::uint32_t source,
+                                             std::uint32_t length) noexcept
+{
+    // Interrupts stay off: after the first erase, no flash-resident handler
+    // may run until the new image is in place.
+    (void)irq_save();
+
+    std::uint8_t buffer[256];
+    sysreg::iwdg_feed();
+    if (flash::erase(kIapStart, kIapEnd))
+    {
+        for (std::uint32_t offset = 0; offset < length; offset += sizeof(buffer))
+        {
+            const std::uint32_t remaining = length - offset;
+            const std::uint32_t chunk =
+                remaining > sizeof(buffer)
+                    ? static_cast<std::uint32_t>(sizeof(buffer))
+                    : remaining;
+            wch_mcpy(buffer, reinterpret_cast<const void *>(source + offset), chunk);
+            if (!flash::write(offset, buffer, chunk))
+            {
+                break;
+            }
+            sysreg::iwdg_feed();
+        }
+    }
+
+    boot_ok();
+    sysreg::software_reset();
+}
+
+[[noreturn]] void finish_boot(usb::UsbDevice &usb, std::uint32_t source,
+                              std::uint32_t length) noexcept
+{
+    // Let the host read the final status byte before the USB device stops.
+    for (int i = 0; i < 200; ++i)
+    {
+        usb.poll();
+        sysreg::iwdg_feed();
+        systick::delay_ms(1u);
+    }
+    copy_boot(source, length);
+}
+
 [[noreturn]] void finish(usb::UsbDevice &usb) noexcept
 {
     // Give the host a moment to read the final status byte before the reset
-    // disconnects the USB device. The application is valid at this point (the
-    // boot region update keeps it, the app update just wrote a CRC-checked
-    // image), so confirm it to the bootloader and reboot.
+    // disconnects the USB device. The application image has just been written
+    // and CRC-checked, so confirm it to the bootloader and reboot.
     for (int i = 0; i < 200; ++i)
     {
         usb.poll();
@@ -110,7 +165,7 @@ bool in_data_range(const Session &session, std::uint32_t address,
 
 void handle_command(usb::UsbDevice &usb, ResponseSource &out, std::uint8_t command,
                     const std::uint8_t *payload, std::uint16_t length,
-                    Session &session) noexcept
+                    Session &session, bool commit_boot) noexcept
 {
     switch (command)
     {
@@ -184,6 +239,10 @@ void handle_command(usb::UsbDevice &usb, ResponseSource &out, std::uint8_t comma
             return;
         }
         out.push(kStatusOk);
+        if (commit_boot)
+        {
+            finish_boot(usb, session.start, session.erase_end - session.start);
+        }
         finish(usb);
     }
 
@@ -203,7 +262,6 @@ struct Receiver
         length_hi,
         payload,
         checksum,
-        discard,
     };
 
     State state = State::sof;
@@ -211,11 +269,10 @@ struct Receiver
     std::uint16_t length = 0;
     std::uint16_t index = 0;
     std::uint8_t checksum = 0;
-    std::uint32_t discard_remaining = 0;
     std::uint8_t payload[kMaxPayload]{};
 
     void feed(usb::UsbDevice &usb, ResponseSource &out, std::uint8_t value,
-              Session &session) noexcept
+              Session &session, bool commit_boot) noexcept
     {
         switch (state)
         {
@@ -245,8 +302,9 @@ struct Receiver
             index = 0;
             if (length > kMaxPayload)
             {
-                discard_remaining = static_cast<std::uint32_t>(length) + 1u;
-                state = State::discard;
+                // The host never sends oversized frames; report and resync.
+                out.push(kStatusFrame);
+                state = State::sof;
             }
             else
             {
@@ -266,7 +324,8 @@ struct Receiver
         case State::checksum:
             if (value == checksum)
             {
-                handle_command(usb, out, command, payload, length, session);
+                handle_command(usb, out, command, payload, length, session,
+                               commit_boot);
             }
             else
             {
@@ -274,41 +333,23 @@ struct Receiver
             }
             state = State::sof;
             break;
-
-        case State::discard:
-            if (--discard_remaining == 0u)
-            {
-                out.push(kStatusFrame);
-                state = State::sof;
-            }
-            break;
         }
     }
 };
 
-} // namespace
-
-void update_region(usb::UsbDevice &usb, std::uint32_t start, std::uint32_t end) noexcept
+[[noreturn]] void update_region_impl(usb::UsbDevice &usb, std::uint32_t start,
+                                     std::uint32_t end, bool commit_boot) noexcept
 {
-    static ResponseSource source;
-    usb.set_source(&source);
+    usb.set_source(&g_source);
+    g_source.reset();
 
     // Drop the trigger and anything else buffered before the handshake.
     std::uint8_t scratch[32];
-    for (;;)
+    while (usb.read_host(scratch, sizeof(scratch)) != 0u)
     {
-        const auto result = usb.read_host(scratch, sizeof(scratch));
-        if (result.status == usb::HostReadStatus::line_coding_changed)
-        {
-            continue;
-        }
-        if (result.status != usb::HostReadStatus::data || result.length == 0u)
-        {
-            break;
-        }
     }
 
-    source.push(kReady);
+    g_source.push(kReady);
 
     Receiver receiver;
     Session session{start, end, start, false};
@@ -319,15 +360,25 @@ void update_region(usb::UsbDevice &usb, std::uint32_t start, std::uint32_t end) 
         sysreg::iwdg_feed();
 
         std::uint8_t chunk[32];
-        const auto result = usb.read_host(chunk, sizeof(chunk));
-        if (result.status == usb::HostReadStatus::data)
+        const std::size_t length = usb.read_host(chunk, sizeof(chunk));
+        for (std::size_t i = 0; i < length; ++i)
         {
-            for (std::size_t i = 0; i < result.length; ++i)
-            {
-                receiver.feed(usb, source, chunk[i], session);
-            }
+            receiver.feed(usb, g_source, chunk[i], session, commit_boot);
         }
     }
+}
+
+} // namespace
+
+[[noreturn]] void update_region(usb::UsbDevice &usb, std::uint32_t start,
+                                std::uint32_t end) noexcept
+{
+    update_region_impl(usb, start, end, false);
+}
+
+[[noreturn]] void update_boot(usb::UsbDevice &usb) noexcept
+{
+    update_region_impl(usb, kStagingStart, kStagingEnd, true);
 }
 
 } // namespace ch572::iap

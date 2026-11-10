@@ -8,17 +8,19 @@ PID = 0x5720
 
 HID_USAGE_PAGE = 0xFF00
 HID_REPORT_ID = 1
-HID_STATUS_REPORT_ID = 2
 HID_MARKER = 0x5A
 HID_TOKEN = b"IAP"
-HID_STATUS_OK = 0x00
 
 CMD_APP_UPDATE = 0x01
 CMD_BOOT_UPDATE = 0x02
 
 
-def request(command, timeout_ms=500):
-    """Ask the running firmware for an upgrade through HID feature report 1."""
+def request(command):
+    """Ask the running firmware for an upgrade through HID feature report 1.
+
+    The firmware has no HID interrupt endpoint, so there is no status reply;
+    the caller waits for the CDC port to (re)appear instead.
+    """
     try:
         import hid
     except ImportError:
@@ -42,16 +44,6 @@ def request(command, timeout_ms=500):
             device.open_path(info["path"])
             if device.send_feature_report(report) < 0:
                 raise OSError("HID feature report was not accepted")
-            try:
-                response = device.read(9, timeout_ms)
-            except (OSError, IOError):
-                response = []
-            if response:
-                status = response[1] if response[0] in (
-                    HID_REPORT_ID, HID_STATUS_REPORT_ID) else response[0]
-                if status != HID_STATUS_OK:
-                    raise SystemExit(
-                        f"upgrade request rejected with HID status 0x{status:02X}")
             return True
         except (OSError, IOError) as error:
             last_error = error

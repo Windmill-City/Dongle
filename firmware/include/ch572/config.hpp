@@ -15,11 +15,16 @@
 namespace ch572 {
 
 // Flash layout shared by the application and the IAP bootloader.
+//
+// The last 8 KiB of the application window is reserved as a staging area for
+// bootloader self-update. The application image ends at kAppEnd.
 inline constexpr std::uint32_t kIapStart = 0x00000000u;
 inline constexpr std::uint32_t kIapEnd = 0x00002000u;
 inline constexpr std::uint32_t kAppStart = 0x00002000u;
-inline constexpr std::uint32_t kAppEnd = 0x0003C000u;
-inline constexpr std::uint32_t kFlashEnd = kAppEnd;
+inline constexpr std::uint32_t kAppEnd = 0x0003A000u;
+inline constexpr std::uint32_t kStagingStart = 0x0003A000u;
+inline constexpr std::uint32_t kStagingEnd = 0x0003C000u;
+inline constexpr std::uint32_t kFlashEnd = kStagingEnd;
 inline constexpr std::uint32_t kFlashSectorSize = 0x1000u;
 
 } // namespace ch572

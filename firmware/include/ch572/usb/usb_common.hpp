@@ -38,8 +38,6 @@ inline constexpr std::uint8_t kReqGetInterface = 0x0A;
 
 inline constexpr std::uint8_t kDescriptorDevice = 1;
 inline constexpr std::uint8_t kDescriptorConfig = 2;
-inline constexpr std::uint8_t kDescriptorString = 3;
-inline constexpr std::uint8_t kDescriptorQualifier = 6;
 inline constexpr std::uint8_t kDescriptorHid = 0x21;
 inline constexpr std::uint8_t kDescriptorHidReport = 0x22;
 
@@ -49,13 +47,10 @@ struct DescriptorSet
 {
     const std::uint8_t *device;
     const std::uint8_t *config;
-    const std::uint8_t *qualifier;
-    const std::uint8_t *strings[4];
 };
 
 inline const std::uint8_t *find_descriptor(const DescriptorSet &set,
-                                           std::uint8_t type,
-                                           std::uint8_t index) noexcept
+                                           std::uint8_t type) noexcept
 {
     switch (type)
     {
@@ -63,10 +58,6 @@ inline const std::uint8_t *find_descriptor(const DescriptorSet &set,
         return set.device;
     case kDescriptorConfig:
         return set.config;
-    case kDescriptorQualifier:
-        return set.qualifier;
-    case kDescriptorString:
-        return index < 4 ? set.strings[index] : nullptr;
     default:
         return nullptr;
     }

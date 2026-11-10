@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "ch572/config.hpp"
+
 namespace ch572 {
 
 inline void fence_i() noexcept { asm volatile("fence.i" ::: "memory"); }
@@ -185,52 +187,21 @@ inline void iwdg_feed() noexcept
 {
     iwdg_key() = 0xAAAAu; // KEY_RELOADING_COUNT
 }
-inline void iwdg_start(std::uint32_t timeout_ms) noexcept
+inline void iwdg_start() noexcept
 {
-    constexpr std::uint32_t kLsiHz = 32768u;
-    constexpr std::uint32_t kMaxReload = 4095u;
-    constexpr std::uint32_t kMaxPrescaler = 512u;
-    constexpr std::uint32_t kMinPrescaler = 4u;
-    constexpr std::uint32_t kMaxTimeoutMs =
-        (kMaxReload * kMaxPrescaler * 1000u) / kLsiHz;
-
-    if (timeout_ms < 1u)
-    {
-        timeout_ms = 1u;
-    }
-    else if (timeout_ms > kMaxTimeoutMs)
-    {
-        timeout_ms = kMaxTimeoutMs;
-    }
-
-    // Round up so the watchdog never expires before the requested timeout.
-    const std::uint32_t ticks = (timeout_ms * kLsiHz + 999u) / 1000u;
-
-    // Choose the smallest prescaler that fits the 12-bit reload register.
-    std::uint32_t prescaler = kMinPrescaler;
-    std::uint32_t prescaler_bits = 0u;
-    while (prescaler_bits < 7u && ticks > kMaxReload * prescaler)
-    {
-        prescaler <<= 1u;
-        ++prescaler_bits;
-    }
-
-    std::uint32_t reload = (ticks + prescaler - 1u) / prescaler;
-    if (reload > kMaxReload)
-    {
-        reload = kMaxReload;
-    }
+    constexpr std::uint32_t kPrescalerBits = 4u; // /64
+    constexpr std::uint32_t kReload = 2560u;     // 5 s at 32.768 kHz
 
     iwdg_key() = 0xCCCCu; // KEY_START_IWDG
     iwdg_key() = 0x5555u; // KEY_UNPROTECT (allow PR/RLR writes)
     // PR field bits 11..13 select /4, /8, ... /512.
-    iwdg_cfg() = (iwdg_cfg() & ~(0x7u << 11)) | (prescaler_bits << 11);
-    for (std::uint32_t guard = 0; guard < 100000u && (iwdg_cfg() & (1u << 15)) != 0u; ++guard)
+    iwdg_cfg() = (iwdg_cfg() & ~(0x7u << 11)) | (kPrescalerBits << 11);
+    while ((iwdg_cfg() & (1u << 15)) != 0u)
     {
     }
     // RLR field bits 16..27 hold the 12-bit reload value.
-    iwdg_cfg() = (iwdg_cfg() & ~(0xFFFu << 16)) | (reload << 16);
-    for (std::uint32_t guard = 0; guard < 100000u && (iwdg_cfg() & (1u << 15)) != 0u; ++guard)
+    iwdg_cfg() = (iwdg_cfg() & ~(0xFFFu << 16)) | (kReload << 16);
+    while ((iwdg_cfg() & (1u << 15)) != 0u)
     {
     }
     iwdg_key() = 0xAAAAu; // load the new timeout
@@ -286,15 +257,9 @@ inline void disable_watchdog_reset() noexcept
 }
 
 // Trigger a software reset without touching the SRAM IAP request flag, so the
-// bootloader still sees the caller's application/upgrade decision.
-[[noreturn]] inline void software_reset() noexcept
-{
-    SafeAccess access;
-    reset_watchdog_ctrl() |= kSoftwareReset;
-    for (;;)
-    {
-    }
-}
+// bootloader still sees the caller's application/upgrade decision. Defined in
+// fault.cpp in .highcode: the bootloader calls it after erasing its own flash.
+[[noreturn]] void software_reset() noexcept;
 
 } // namespace sysreg
 
@@ -389,14 +354,11 @@ inline volatile std::uint8_t &ep2_3_mod() noexcept { return at<std::uint8_t>(0x0
 inline volatile std::uint16_t &ep0_dma() noexcept { return at<std::uint16_t>(0x10); }
 inline volatile std::uint16_t &ep1_dma() noexcept { return at<std::uint16_t>(0x14); }
 inline volatile std::uint16_t &ep2_dma() noexcept { return at<std::uint16_t>(0x18); }
-inline volatile std::uint16_t &ep3_dma() noexcept { return at<std::uint16_t>(0x1C); }
 inline volatile std::uint8_t &ep0_t_len() noexcept { return at<std::uint8_t>(0x20); }
 inline volatile std::uint8_t &ep0_ctrl() noexcept { return at<std::uint8_t>(0x22); }
 inline volatile std::uint8_t &ep1_ctrl() noexcept { return at<std::uint8_t>(0x26); }
 inline volatile std::uint8_t &ep2_t_len() noexcept { return at<std::uint8_t>(0x28); }
 inline volatile std::uint8_t &ep2_ctrl() noexcept { return at<std::uint8_t>(0x2A); }
-inline volatile std::uint8_t &ep3_t_len() noexcept { return at<std::uint8_t>(0x2C); }
-inline volatile std::uint8_t &ep3_ctrl() noexcept { return at<std::uint8_t>(0x2E); }
 
 inline constexpr std::uint8_t kUcDevPuEn = 0x20;
 inline constexpr std::uint8_t kUcIntBusy = 0x08;
@@ -423,8 +385,6 @@ inline constexpr std::uint8_t kUep1RxEn = 0x80;
 inline constexpr std::uint8_t kUep1TxEn = 0x40;
 inline constexpr std::uint8_t kUep2RxEn = 0x08;
 inline constexpr std::uint8_t kUep2TxEn = 0x04;
-inline constexpr std::uint8_t kUep3RxEn = 0x80;
-inline constexpr std::uint8_t kUep3TxEn = 0x40;
 inline constexpr std::uint8_t kUepRTog = 0x80;
 inline constexpr std::uint8_t kUepTTog = 0x40;
 inline constexpr std::uint8_t kMaskUepRRes = 0x0C;

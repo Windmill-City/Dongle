@@ -5,11 +5,12 @@ Both targets use the same path:
 
     1. the host sends HID feature report 1
        (command 0x01 = application, 0x02 = boot region)
-    2. the application either resets into the bootloader (app upgrade) or
-       serves the update in place (boot upgrade)
+    2. the application sets the upgrade flag and resets into the bootloader
     3. the host opens the CDC ACM serial port and waits for the ready byte 0x5A
     4. the host streams A5 | CMD | LEN_LO LEN_HI | PAYLOAD | XOR frames
-    5. the device verifies the CRC and resets
+    5. for an application upgrade the bootloader writes 0x2000; for a boot
+       upgrade it writes the staging area 0x3A000, verifies the CRC, then
+       copies the image to 0x0000 from RAM and resets
 
 Commands: 0x01 erase(length), 0x02 data(addr + data), 0x04 end(crc32).
 Every frame is answered with one status byte; 0 means success.
@@ -46,7 +47,9 @@ STATUS_NAMES = {
 IAP_START = 0x00000000
 IAP_END = 0x00002000
 APP_START = 0x00002000
-APP_END = 0x0003C000
+APP_END = 0x0003A000
+STAGING_START = 0x0003A000
+STAGING_END = 0x0003C000
 
 # Multiple of 4 (word programming) and small enough that a whole frame stays
 # inside one 64-byte USB packet.
@@ -154,7 +157,7 @@ def open_link(port, timeout):
     raise SystemExit(f"upgrade port did not become ready{detail}")
 
 
-def update(link, image, start):
+def update(link, image, write_start):
     print("erasing...")
     link.command(CMD_ERASE, struct.pack("<I", len(image)))
 
@@ -162,7 +165,7 @@ def update(link, image, start):
     offset = 0
     while offset < total:
         chunk = image[offset:offset + CHUNK]
-        link.command(CMD_DATA, struct.pack("<I", start + offset) + chunk)
+        link.command(CMD_DATA, struct.pack("<I", write_start + offset) + chunk)
         offset += len(chunk)
         print(f"\rprogrammed {offset}/{total}", end="", flush=True)
     print()
@@ -186,20 +189,26 @@ def main():
 
     if args.target == "app":
         start, end = APP_START, APP_END
+        write_start = start
         command = common.CMD_APP_UPDATE
     else:
         start, end = IAP_START, IAP_END
+        write_start = STAGING_START
         command = common.CMD_BOOT_UPDATE
 
     image = load_image(args.image, start, end)
-    print(f"{args.target} image {args.image}: {len(image)} bytes at 0x{start:08X}")
+    if args.target == "app":
+        print(f"{args.target} image {args.image}: {len(image)} bytes at 0x{start:08X}")
+    else:
+        print(f"{args.target} image {args.image}: {len(image)} bytes, "
+              f"staged at 0x{write_start:08X}, copied to 0x{IAP_START:08X}")
 
     common.request(command)
     print("upgrade request sent; waiting for the serial port...")
 
     link = open_link(args.port, args.timeout)
     try:
-        update(link, image, start)
+        update(link, image, write_start)
     finally:
         link.close()
     return 0

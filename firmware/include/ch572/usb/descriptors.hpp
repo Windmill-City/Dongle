@@ -7,20 +7,6 @@
 
 namespace ch572::usb {
 
-// Internal line-coding block shared with the RF protocol. The first seven bytes
-// match the CDC ACM GET/SET_LINE_CODING payload; the last byte carries the CDC
-// control-line state (DTR/RTS) without changing the RF frame layout.
-struct __attribute__((packed)) LineCoding
-{
-    std::uint32_t baud_rate;
-    std::uint8_t stop_bits;
-    std::uint8_t parity;
-    std::uint8_t data_bits;
-    std::uint8_t line_state;
-};
-
-static_assert(sizeof(LineCoding) == 8, "line coding keeps the RF frame layout");
-
 inline constexpr std::size_t kCdcLineCodingSize = 7;
 
 inline constexpr std::uint16_t kVendorId = 0x1A86;
@@ -30,25 +16,26 @@ inline constexpr std::uint8_t kCdcInterface = 0;
 inline constexpr std::uint8_t kCdcDataInterface = 1;
 inline constexpr std::uint8_t kHidInterface = 2;
 
-inline constexpr std::uint8_t kHidReportId = 1;       // host -> device feature report
-inline constexpr std::uint8_t kHidStatusReportId = 2; // device -> host input report
+inline constexpr std::uint8_t kHidReportId = 1; // host -> device feature report
 inline constexpr std::size_t kHidReportSize = 8;
-inline constexpr std::size_t kHidTransferSize = kHidReportSize + 1;
 
-// Composite device: IAD groups the CDC communication/data interfaces, and the
-// HID interface carries upgrade control. The serial data path is plain CDC ACM.
+// No string descriptors: the host uses the default names. This saves the
+// descriptor table and the string lookup path.
 inline constexpr std::uint8_t kDeviceDescriptor[] = {
     0x12, 0x01,
     0x00, 0x02,
     0xEF, 0x02, 0x01, 0x40,
     0x86, 0x1A, 0x20, 0x57,
     0x00, 0x01,
-    0x01, 0x02, 0x03,
+    0x00, 0x00, 0x00,
     0x01,
 };
 
+// Application: CDC ACM + a feature-only HID interface used to trigger an
+// update. The HID interface has no endpoint; SET_REPORT arrives on EP0.
+#ifndef IAP_BOOT
 inline constexpr std::uint8_t kConfigDescriptor[] = {
-    0x09, 0x02, 0x64, 0x00, 0x03, 0x01, 0x00, 0x80, 0x32,
+    0x09, 0x02, 0x5D, 0x00, 0x03, 0x01, 0x00, 0x80, 0x32,
 
     0x08, 0x0B, 0x00, 0x02, 0x02, 0x02, 0x01, 0x00,
 
@@ -63,20 +50,38 @@ inline constexpr std::uint8_t kConfigDescriptor[] = {
     0x07, 0x05, 0x02, 0x02, 0x40, 0x00, 0x00,
     0x07, 0x05, 0x82, 0x02, 0x40, 0x00, 0x00,
 
-    0x09, 0x04, 0x02, 0x00, 0x01, 0x03, 0x00, 0x00, 0x00,
-    0x09, 0x21, 0x11, 0x01, 0x00, 0x01, 0x22, 0x26, 0x00,
-    0x07, 0x05, 0x83, 0x03, 0x10, 0x00, 0x0A,
+    0x09, 0x04, 0x02, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00,
+    0x09, 0x21, 0x11, 0x01, 0x00, 0x01, 0x22, 0x17, 0x00,
 };
+static_assert(sizeof(kConfigDescriptor) == 0x5D, "configuration length");
+#else
+// Bootloader: CDC ACM only. The application sends the HID request before it
+// resets into the bootloader, so the bootloader never needs a HID interface.
+inline constexpr std::uint8_t kConfigDescriptor[] = {
+    0x09, 0x02, 0x4B, 0x00, 0x02, 0x01, 0x00, 0x80, 0x32,
 
+    0x08, 0x0B, 0x00, 0x02, 0x02, 0x02, 0x01, 0x00,
+
+    0x09, 0x04, 0x00, 0x00, 0x01, 0x02, 0x02, 0x01, 0x00,
+    0x05, 0x24, 0x00, 0x10, 0x01,
+    0x05, 0x24, 0x01, 0x00, 0x01,
+    0x04, 0x24, 0x02, 0x02,
+    0x05, 0x24, 0x06, 0x00, 0x01,
+    0x07, 0x05, 0x81, 0x03, 0x08, 0x00, 0x10,
+
+    0x09, 0x04, 0x01, 0x00, 0x02, 0x0A, 0x00, 0x00, 0x00,
+    0x07, 0x05, 0x02, 0x02, 0x40, 0x00, 0x00,
+    0x07, 0x05, 0x82, 0x02, 0x40, 0x00, 0x00,
+};
+static_assert(sizeof(kConfigDescriptor) == 0x4B, "configuration length");
+#endif
+
+#ifndef IAP_BOOT
 inline constexpr std::uint8_t kHidDescriptor[] = {
-    0x09, 0x21, 0x11, 0x01, 0x00, 0x01, 0x22, 0x26, 0x00,
+    0x09, 0x21, 0x11, 0x01, 0x00, 0x01, 0x22, 0x17, 0x00,
 };
 
-static_assert(sizeof(kConfigDescriptor) == 0x64, "configuration length");
-
-// Vendor-defined HID collection. Report ID 1 is an eight-byte feature report
-// used by the host to request an application or boot-region upgrade. Report
-// ID 2 is the input report that returns the request status.
+// One eight-byte feature report; no input report, so no interrupt endpoint.
 inline constexpr std::uint8_t kHidReportDescriptor[] = {
     0x06, 0x00, 0xFF,
     0x09, 0x01,
@@ -88,49 +93,15 @@ inline constexpr std::uint8_t kHidReportDescriptor[] = {
     0x75, 0x08,
     0x95, 0x08,
     0xB1, 0x02,
-    0x85, 0x02,
-    0x09, 0x03,
-    0x15, 0x00,
-    0x26, 0xFF, 0x00,
-    0x75, 0x08,
-    0x95, 0x08,
-    0x81, 0x02,
     0xC0,
 };
 
-static_assert(sizeof(kHidReportDescriptor) == 0x26, "HID report length");
-
-inline constexpr std::uint8_t kQualifierDescriptor[] = {
-    0x0A, 0x06, 0x00, 0x02, 0xEF, 0x02, 0x01, 0x40, 0x01, 0x00,
-};
-
-inline constexpr std::uint8_t kLanguageDescriptor[] = {
-    0x04, 0x03, 0x09, 0x04,
-};
-
-inline constexpr std::uint8_t kManufacturerDescriptor[] = {
-    0x0E, 0x03,
-    'w', 0x00, 'c', 0x00, 'h', 0x00, '.', 0x00, 'c', 0x00, 'n', 0x00,
-};
-
-inline constexpr std::uint8_t kProductDescriptor[] = {
-    0x1C, 0x03,
-    'C', 0x00, 'H', 0x00, '5', 0x00, '7', 0x00, '2', 0x00,
-    ' ', 0x00, 'R', 0x00, 'F', 0x00, ' ', 0x00,
-    'U', 0x00, 'A', 0x00, 'R', 0x00, 'T', 0x00,
-};
-
-inline constexpr std::uint8_t kSerialDescriptor[] = {
-    0x18, 0x03,
-    'C', 0x00, 'H', 0x00, '5', 0x00, '7', 0x00, '2', 0x00,
-    'R', 0x00, 'F', 0x00, '0', 0x00, '0', 0x00, '0', 0x00, '1', 0x00,
-};
+static_assert(sizeof(kHidReportDescriptor) == 0x17, "HID report length");
+#endif
 
 inline constexpr DescriptorSet kDescriptors = {
     kDeviceDescriptor,
     kConfigDescriptor,
-    kQualifierDescriptor,
-    {kLanguageDescriptor, kManufacturerDescriptor, kProductDescriptor, kSerialDescriptor},
 };
 
 } // namespace ch572::usb

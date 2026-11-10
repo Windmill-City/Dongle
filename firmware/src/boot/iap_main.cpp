@@ -35,21 +35,21 @@ int main()
     systick::start(6400u); // reset-default 6.4 MHz
 
     // Boot the application unless it asked to stay in the bootloader (either
-    // because it failed to confirm startup or because the host requested an
-    // application upgrade through the vendor control request).
-    if (!iap::requested())
+    // because it failed to confirm startup, because the host requested an
+    // application upgrade, or because it requested a bootloader update).
+    const bool boot_update = iap::update_requested();
+    if (!boot_update && !iap::requested())
     {
         iap::request();
         jump_to_app();
     }
 
-    // Application upgrade mode: expose the same framed serial protocol the
-    // application uses to rewrite the boot region, but target the application
-    // region. The bootloader itself is never erased here.
+    // Application upgrade mode writes the application region. Bootloader
+    // update mode first writes the staged image, then copies it to 0x0000 from
+    // a RAM routine.
     clock::set_hse_capacitance(clock::HseCapacitance::p8);
     clock::init_100mhz();
     systick::start(100000u); // 100 MHz
-    sysreg::pin_alternate() &= ~sysreg::kPinDebugEnable;
 
     auto &usb = usb::UsbDevice::instance();
     usb.init();
@@ -58,6 +58,10 @@ int main()
         usb.poll();
     }
 
-    sysreg::iwdg_start(5000u);
+    sysreg::iwdg_start();
+    if (boot_update)
+    {
+        iap::update_boot(usb);
+    }
     iap::update_region(usb, kAppStart, kAppEnd);
 }

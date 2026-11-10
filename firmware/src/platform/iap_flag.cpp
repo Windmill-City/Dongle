@@ -16,6 +16,7 @@ namespace {
 constexpr std::uint32_t kFlagMagic = 0x00494150u; // "IAP"
 constexpr std::uint8_t kFlagApp = 0xAAu;          // application confirmed
 constexpr std::uint8_t kFlagIap = 0x55u;          // explicit IAP request
+constexpr std::uint8_t kFlagBootUpdate = 0x5Bu;   // bootloader self-update
 
 struct Flag
 {
@@ -39,7 +40,7 @@ bool is_valid() noexcept
     return g_flag.magic == kFlagMagic && reset_keeps_request();
 }
 
-void set_flag(std::uint8_t value) noexcept
+CH572_HIGH_CODE void set_flag(std::uint8_t value) noexcept
 {
     g_flag.value = value;
     g_flag.magic = kFlagMagic;
@@ -52,6 +53,11 @@ bool requested() noexcept
     return is_valid() && g_flag.value == kFlagIap;
 }
 
+bool update_requested() noexcept
+{
+    return is_valid() && g_flag.value == kFlagBootUpdate;
+}
+
 void app_ok() noexcept
 {
     set_flag(kFlagApp);
@@ -62,10 +68,20 @@ void request() noexcept
     set_flag(kFlagIap);
 }
 
+void request_update() noexcept
+{
+    set_flag(kFlagBootUpdate);
+}
+
 void jump() noexcept
 {
     request();
     sysreg::software_reset();
+}
+
+CH572_HIGH_CODE void boot_ok() noexcept
+{
+    set_flag(kFlagApp);
 }
 
 } // namespace ch572::iap

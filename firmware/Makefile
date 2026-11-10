@@ -18,22 +18,22 @@ CXXFLAGS      := $(ARCH) -Os -std=c++17 \
 ASFLAGS       := $(ARCH) -x assembler-with-cpp
 INCLUDES      := -Iinclude
 
-COMMON_CXX    := src/platform/gpio.cpp src/platform/clock.cpp \
-                 src/platform/fault.cpp src/platform/iap_flag.cpp
+COMMON_CXX    := src/platform/clock.cpp src/platform/fault.cpp \
+                 src/platform/iap_flag.cpp
 APP_CXX       := src/main.cpp src/platform/systick.cpp \
-                 src/platform/flash.cpp src/boot/iap_update.cpp \
-                 src/hal/led.cpp \
                  src/usb/usb_device.cpp \
                  src/radio/rfip.cpp src/radio/rf_uart.cpp src/radio/rfend.cpp
 IAP_CXX       := src/boot/iap_main.cpp src/boot/iap_update.cpp \
                  src/usb/usb_device.cpp src/platform/systick.cpp
 
 LDSCRIPT      := ld/ch572.ld
-LD_DEFS_APP   := -Wl,--defsym=FLASH_ORIGIN=0x00002000 -Wl,--defsym=FLASH_LENGTH=0x0003A000
+LD_DEFS_APP   := -Wl,--defsym=FLASH_ORIGIN=0x00002000 -Wl,--defsym=FLASH_LENGTH=0x00038000
 LD_DEFS_IAP   := -Wl,--defsym=FLASH_ORIGIN=0x00000000 -Wl,--defsym=FLASH_LENGTH=0x00002000
 LIBS          := -lm
 
 ifdef IAP_BOOT
+CXXFLAGS     += -DIAP_BOOT=1
+ASFLAGS      += -DIAP_BOOT=1
 CXX_SOURCES   := $(COMMON_CXX) $(IAP_CXX) src/platform/flash.cpp
 LD_DEFS       := $(LD_DEFS_IAP)
 else
