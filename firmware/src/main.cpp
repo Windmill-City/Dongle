@@ -9,7 +9,6 @@ int main()
 
     sysreg::disable_watchdog_reset();
     clock::init_100mhz();
-    sysreg::iwdg_start();
 
     auto& usb = usb::UsbDevice::instance();
     usb.init();
@@ -21,6 +20,5 @@ int main()
     for (;;)
     {
         usb.poll();
-        sysreg::iwdg_feed();
     }
 }

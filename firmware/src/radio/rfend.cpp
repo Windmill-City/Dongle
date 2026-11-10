@@ -60,18 +60,10 @@ void rx_filter() noexcept
     Lle::r32(lle::Timer) = 100;
     for (volatile std::uint32_t i = 0; i < 1000000u; ++i)
     {
-        if ((i & 0x3FFFu) == 0u)
-        {
-            sysreg::iwdg_feed();
-        }
         nop();
     }
     for (std::uint32_t i = 0; i < kCalibrationTimeout; ++i)
     {
-        if ((i & 0x3FFFu) == 0u)
-        {
-            sysreg::iwdg_feed();
-        }
         if ((RfEnd::r32(off::FilterResult) & 0x100u) != 0)
         {
             break;
@@ -114,10 +106,6 @@ void wait_tune(std::uint16_t cycles) noexcept
 
     for (std::uint32_t i = 0; i < kCalibrationTimeout; ++i)
     {
-        if ((i & 0x3FFFu) == 0u)
-        {
-            sysreg::iwdg_feed();
-        }
         if (Lle::r32(lle::Timer) == 0)
         {
             break;

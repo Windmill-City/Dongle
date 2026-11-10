@@ -174,43 +174,6 @@ inline volatile std::uint8_t& reset_watchdog_ctrl() noexcept
     return *reinterpret_cast<volatile std::uint8_t*>(0x40001046u);
 }
 
-// Independent watchdog (IWDT): runs from the 32 kHz LSI, 4..512 prescaler,
-// 12-bit reload.  timeout = prescaler * reload / 32768 s.
-inline volatile std::uint32_t& iwdg_key() noexcept
-{
-    return *reinterpret_cast<volatile std::uint32_t*>(0x40001000u);
-}
-
-inline volatile std::uint32_t& iwdg_cfg() noexcept
-{
-    return *reinterpret_cast<volatile std::uint32_t*>(0x40001004u);
-}
-
-inline void iwdg_feed() noexcept
-{
-    iwdg_key() = 0xAAAAu; // KEY_RELOADING_COUNT
-}
-
-inline void iwdg_start() noexcept
-{
-    constexpr std::uint32_t kPrescalerBits = 4u;      // /64
-    constexpr std::uint32_t kReload        = 2560u;   // 5 s at 32.768 kHz
-
-    iwdg_key()                             = 0xCCCCu; // KEY_START_IWDG
-    iwdg_key()                             = 0x5555u; // KEY_UNPROTECT (allow PR/RLR writes)
-    // PR field bits 11..13 select /4, /8, ... /512.
-    iwdg_cfg()                             = (iwdg_cfg() & ~(0x7u << 11)) | (kPrescalerBits << 11);
-    while ((iwdg_cfg() & (1u << 15)) != 0u)
-    {
-    }
-    // RLR field bits 16..27 hold the 12-bit reload value.
-    iwdg_cfg() = (iwdg_cfg() & ~(0xFFFu << 16)) | (kReload << 16);
-    while ((iwdg_cfg() & (1u << 15)) != 0u)
-    {
-    }
-    iwdg_key() = 0xAAAAu; // load the new timeout
-}
-
 inline volatile std::uint16_t& pin_alternate() noexcept
 {
     return *reinterpret_cast<volatile std::uint16_t*>(0x40001018u);

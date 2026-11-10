@@ -127,16 +127,12 @@ void role_init(ProcessCallback process_cb) noexcept
     }
 
     g_process_cb = process_cb;
-    sysreg::iwdg_feed();
 
     rfend_block::dev_init();
-    sysreg::iwdg_feed();
 
     wakeup_reg_init();
-    sysreg::iwdg_feed();
 
     calibration();
-    sysreg::iwdg_feed();
 
     enable_irq(Irq::BleBb);
     enable_irq(Irq::BleLle);
