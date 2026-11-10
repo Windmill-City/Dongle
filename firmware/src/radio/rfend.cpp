@@ -37,7 +37,7 @@ std::int32_t divide(std::int32_t numerator, std::int32_t denominator) noexcept
 
 } // namespace
 
-void dev_init() noexcept
+void init() noexcept
 {
     RfEnd::r32(off::TxBias)        = 1152;
     RfEnd::r32(off::Power)         = (RfEnd::r32(off::Power) & 0xF8FFFFFFu) | 0x20000000u;

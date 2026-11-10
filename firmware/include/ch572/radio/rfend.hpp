@@ -17,7 +17,7 @@ inline std::uint8_t tune_filter_2m() noexcept
 }
 
 // Low-level RF front-end calibration block.
-void dev_init() noexcept;
+void init() noexcept;
 void calibration() noexcept;
 
 } // namespace ch572::rfend

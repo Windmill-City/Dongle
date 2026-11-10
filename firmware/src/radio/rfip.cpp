@@ -158,7 +158,7 @@ void init(ProcessCallback process_cb) noexcept
 
     g_process_cb = process_cb;
 
-    rfend_block::dev_init();
+    rfend_block::init();
 
     wakeup();
 
