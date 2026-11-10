@@ -3,16 +3,18 @@
 #include "ch572/compiler.hpp"
 #include "ch572/platform/registers.hpp"
 
-namespace ch572::clock {
-namespace {
+namespace ch572::clock
+{
+namespace
+{
 
 constexpr std::uint8_t kSysClockSelectHse = 0xC0;
 constexpr std::uint8_t kSysClockSelectPll = 0x40;
-constexpr std::uint8_t kPll100MHz = kSysClockSelectPll | 6;
-constexpr std::uint8_t kPowerPlanEnable = 0x40;
-constexpr std::uint8_t kFlashPllConfig = 0x01;
-constexpr std::uint8_t kFlashSckPll = 1u << 4;
-constexpr std::uint8_t kHseCapacitanceP8 = 0x10;
+constexpr std::uint8_t kPll100MHz         = kSysClockSelectPll | 6;
+constexpr std::uint8_t kPowerPlanEnable   = 0x40;
+constexpr std::uint8_t kFlashPllConfig    = 0x01;
+constexpr std::uint8_t kFlashSckPll       = 1u << 4;
+constexpr std::uint8_t kHseCapacitanceP8  = 0x10;
 
 } // namespace
 
@@ -20,8 +22,7 @@ CH572_HIGH_CODE void init_100mhz() noexcept
 {
     {
         sysreg::SafeAccess access;
-        sysreg::xt32m_tune() =
-            static_cast<std::uint8_t>((sysreg::xt32m_tune() & 0x0Fu) | kHseCapacitanceP8);
+        sysreg::xt32m_tune() = static_cast<std::uint8_t>((sysreg::xt32m_tune() & 0x0Fu) | kHseCapacitanceP8);
     }
 
     if ((sysreg::hfck_power_ctrl() & sysreg::kClockXt32mOn) == 0)
@@ -45,7 +46,7 @@ CH572_HIGH_CODE void init_100mhz() noexcept
         {
             sysreg::SafeAccess access;
             sysreg::clock_sys_cfg() = saved_cfg;
-            sysreg::xt32m_tune() = saved_tune;
+            sysreg::xt32m_tune()    = saved_tune;
         }
     }
 

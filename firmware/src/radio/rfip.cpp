@@ -4,69 +4,68 @@
 #include "ch572/platform/registers.hpp"
 #include "ch572/radio/rfend.hpp"
 
-namespace ch572::rf {
+namespace ch572::rf
+{
 
-namespace {
+namespace
+{
 
 using radio_reg::Bb;
 using radio_reg::Lle;
 using radio_reg::RfEnd;
-namespace lle = radio_reg::lle;
-namespace bb = radio_reg::bb;
-namespace rfend_reg = radio_reg::rfend;
-namespace rfend_block = ch572::rfend;
+namespace lle                                   = radio_reg::lle;
+namespace bb                                    = radio_reg::bb;
+namespace rfend_reg                             = radio_reg::rfend;
+namespace rfend_block                           = ch572::rfend;
 
-RoleConfig g_role_config{};
-std::uint32_t g_wait_recv_time = 0;
+ProcessCallback                g_process_cb     = nullptr;
+std::uint32_t                  g_wait_recv_time = 0;
 
 // Raw LLE interrupt bits. Bit 2 means "TX finished" in the LLE status register;
 // the timeout is bit 17. Keep the decoding here so the public RoleEvent values
 // stay independent of the vendor register layout.
-inline constexpr std::uint32_t kLleRx = 1u << 0;
-inline constexpr std::uint32_t kLleTxDone = 1u << 2;
-inline constexpr std::uint32_t kLleTimeout = 1u << 17;
-inline constexpr std::uint32_t kLleTimerIrq = 0x200000u;
+inline constexpr std::uint32_t kLleRx           = 1u << 0;
+inline constexpr std::uint32_t kLleTxDone       = 1u << 2;
+inline constexpr std::uint32_t kLleTimeout      = 1u << 17;
+inline constexpr std::uint32_t kLleTimerIrq     = 0x200000u;
 
-CH572_HIGH_CODE void rf_basic_process(std::uint32_t raw_irq) noexcept;
-void wakeup_reg_init() noexcept;
-void calibration() noexcept;
+CH572_HIGH_CODE void           rf_basic_process(std::uint32_t raw_irq) noexcept;
+void                           wakeup_reg_init() noexcept;
+void                           calibration() noexcept;
 CH572_HIGH_CODE std::uint8_t read_crc() noexcept;
 
-inline std::uint32_t read_u32(const void *address) noexcept
+inline std::uint32_t         read_u32(const void* address) noexcept
 {
-    return *static_cast<const std::uint32_t *>(address);
+    return *static_cast<const std::uint32_t*>(address);
 }
 
 CH572_HIGH_CODE void start_lle_timer(std::uint32_t total, std::uint32_t bit) noexcept
 {
     const std::uint32_t saved = Lle::r32(lle::Config2);
-    Lle::r32(lle::Config2) = saved & ~bit;
+    Lle::r32(lle::Config2)    = saved & ~bit;
     fence_i();
-    Lle::r32(lle::Irq) = bit;
-    Lle::r32(lle::Timer) = total;
+    Lle::r32(lle::Irq)     = bit;
+    Lle::r32(lle::Timer)   = total;
     Lle::r32(lle::Config2) = saved;
 }
 
 CH572_HIGH_CODE void configure_channel(std::uint32_t channel) noexcept
 {
     RfEnd::r32(rfend_reg::TxControl) &= ~2u;
-    Bb::r32(bb::Control) =
-        (Bb::r32(bb::Control) & 0xFFFFFF80u) | (channel & 0x7Fu);
+    Bb::r32(bb::Control) = (Bb::r32(bb::Control) & 0xFFFFFF80u) | (channel & 0x7Fu);
 }
 
-CH572_HIGH_CODE void set_phy_tx_mode(const TxParams &params) noexcept
+CH572_HIGH_CODE void set_phy_tx_mode(std::uint32_t tx_dma) noexcept
 {
     RfEnd::r32(rfend_reg::PhyConfig) &= ~0x700u;
 
     Bb::r32(bb::Control) &= ~0x300u;
-    const std::uint32_t dma_word =
-        read_u32(reinterpret_cast<const void *>(params.tx_dma));
+    const std::uint32_t dma_word = read_u32(reinterpret_cast<const void*>(tx_dma));
     Bb::r32(bb::Control3) &= 0xF9FFFFFFu;
 
-    const std::uint32_t wait = Lle::r16(lle::WaitTime);
+    const std::uint32_t wait   = Lle::r16(lle::WaitTime);
     const std::uint32_t length = (dma_word >> 8) & 0xFFu;
-    const std::uint32_t total =
-        (((length + 11u) << 2) + ((wait >> 1) + 44u)) << 1;
+    const std::uint32_t total  = (((length + 11u) << 2) + ((wait >> 1) + 44u)) << 1;
     start_lle_timer(total, 0x20000u);
 }
 
@@ -74,28 +73,26 @@ CH572_HIGH_CODE void set_phy_rx_mode(std::uint8_t rx_max_len) noexcept
 {
     Bb::r32(bb::Control) &= ~0x300u;
     RfEnd::r32(rfend_reg::FilterControl) =
-        (RfEnd::r32(rfend_reg::FilterControl) & ~0x1Fu) |
-        (rfend_block::tune_filter_2m() & 0x1Fu);
+        (RfEnd::r32(rfend_reg::FilterControl) & ~0x1Fu) | (rfend_block::tune_filter_2m() & 0x1Fu);
     Bb::r32(bb::Control3) &= 0xF9FFFFFFu;
-    Bb::r32(bb::Control1) = (Bb::r32(bb::Control1) & ~0x3Fu) | 13u;
+    Bb::r32(bb::Control1)    = (Bb::r32(bb::Control1) & ~0x3Fu) | 13u;
     Bb::r8(bb::Control2High) = 127u;
-    Bb::r32(bb::Control2) = (Bb::r32(bb::Control2) & ~0x3FFu) | 160u;
-    g_wait_recv_time =
-        ((static_cast<std::uint32_t>(rx_max_len) + 3u) << 3) + 60u;
+    Bb::r32(bb::Control2)    = (Bb::r32(bb::Control2) & ~0x3FFu) | 160u;
+    g_wait_recv_time         = ((static_cast<std::uint32_t>(rx_max_len) + 3u) << 3) + 60u;
 }
 
 CH572_HIGH_CODE void notify(RoleEvent event) noexcept
 {
-    if (g_role_config.process_cb != nullptr)
+    if (g_process_cb != nullptr)
     {
-        g_role_config.process_cb(event);
+        g_process_cb(event);
     }
 }
 
 CH572_HIGH_CODE void stop_lle_timer() noexcept
 {
     Lle::r32(lle::Timer) = 0;
-    Lle::r32(lle::Irq) = kLleTimerIrq;
+    Lle::r32(lle::Irq)   = kLleTimerIrq;
 }
 
 CH572_HIGH_CODE void rf_basic_process(std::uint32_t raw_irq) noexcept
@@ -122,14 +119,14 @@ CH572_HIGH_CODE void rf_basic_process(std::uint32_t raw_irq) noexcept
 
 } // namespace
 
-void role_init(RoleConfig *config) noexcept
+void role_init(ProcessCallback process_cb) noexcept
 {
-    if (config == nullptr)
+    if (process_cb == nullptr)
     {
         return;
     }
 
-    g_role_config = *config;
+    g_process_cb = process_cb;
     sysreg::iwdg_feed();
 
     rfend_block::dev_init();
@@ -145,7 +142,8 @@ void role_init(RoleConfig *config) noexcept
     enable_irq(Irq::BleLle);
 }
 
-namespace {
+namespace
+{
 
 void wakeup_reg_init() noexcept
 {
@@ -156,10 +154,10 @@ void wakeup_reg_init() noexcept
     }
     Lle::r32(lle::Config) |= 0x1Eu;
     Lle::r32(lle::Config54) = 0;
-    Lle::r32(lle::Config2) = 0x20003u;
-    Bb::r32(bb::CrcStatus) = 0xFFFFu;
-    Bb::r32(bb::RxConfig) = 64u;
-    Bb::r32(0x38) = 0x20018u;
+    Lle::r32(lle::Config2)  = 0x20003u;
+    Bb::r32(bb::CrcStatus)  = 0xFFFFu;
+    Bb::r32(bb::RxConfig)   = 64u;
+    Bb::r32(0x38)           = 0x20018u;
 }
 
 void calibration() noexcept
@@ -185,7 +183,7 @@ void calibration() noexcept
 
     rfend_block::calibration();
 
-    Lle::r32(lle::Irq) = 0x20000u;
+    Lle::r32(lle::Irq)   = 0x20000u;
     Bb::r32(bb::Control) = (Bb::r32(bb::Control) & 0xFFFCFFFFu) | 0x10000u;
     RfEnd::r32(rfend_reg::Control2) &= 0xFFCDFFFFu;
     Lle::r32(lle::PhyControl) = 0x000F0080u;
@@ -198,24 +196,25 @@ std::uint8_t read_crc() noexcept
 
 } // namespace
 
-void start_tx(TxParams *params) noexcept
+void start_tx(Frame* frame) noexcept
 {
-    if (params == nullptr)
+    if (frame == nullptr)
     {
         return;
     }
 
+    const std::uint32_t tx_dma = reinterpret_cast<std::uint32_t>(frame);
     Lle::r32(lle::Control) |= 8u;
     Bb::r32(bb::TxPower) =
-        (Bb::r32(bb::TxPower) & 0x01FFFFFFu) |
-        (static_cast<std::uint32_t>((static_cast<std::uint8_t>(params->tx_power) | 0x40u) & 0xFFu) << 25);
-    Lle::r16(lle::WaitTime) = params->wait_time;
-    Bb::r32(bb::TxPower) = (Bb::r32(bb::TxPower) & ~3u) | 1u;
-    Bb::r32(bb::Control) = (Bb::r32(bb::Control) & 0xFFFCFFFFu) | 0x200000u;
+        (Bb::r32(bb::TxPower) & 0x01FFFFFFu)
+        | (static_cast<std::uint32_t>((static_cast<std::uint8_t>(kLinkTxPower) | 0x40u) & 0xFFu) << 25);
+    Lle::r16(lle::WaitTime) = kLinkWaitTime;
+    Bb::r32(bb::TxPower)    = (Bb::r32(bb::TxPower) & ~3u) | 1u;
+    Bb::r32(bb::Control)    = (Bb::r32(bb::Control) & 0xFFFCFFFFu) | 0x200000u;
     RfEnd::r32(rfend_reg::Control2) |= 0x33000000u;
     Lle::r32(lle::PhyControl) = 0x000F02D8u;
 
-    configure_channel(params->frequency);
+    configure_channel(kLinkFrequency);
 
     if (Lle::r16(lle::WaitTime) > 40u)
     {
@@ -227,23 +226,22 @@ void start_tx(TxParams *params) noexcept
         RfEnd::r32(rfend_reg::Control) |= 0x100u;
     }
 
-    Bb::r32(bb::AccessAddress) = params->access_address;
+    Bb::r32(bb::AccessAddress)   = kLinkAccessAddress;
     Bb::r32(bb::AccessAddressEx) = 0u;
-    Bb::r32(bb::CrcInit) = params->crc_init;
-    Bb::r32(bb::CrcPoly) =
-        (Bb::r32(bb::CrcPoly) & 0xFF000000u) | (params->crc_poly & 0x00FFFFFFu);
-    Lle::r32(lle::TxDma) = params->tx_dma;
+    Bb::r32(bb::CrcInit)         = kLinkCrcInit;
+    Bb::r32(bb::CrcPoly)         = (Bb::r32(bb::CrcPoly) & 0xFF000000u) | (kLinkCrcPoly & 0x00FFFFFFu);
+    Lle::r32(lle::TxDma)         = tx_dma;
 
-    set_phy_tx_mode(*params);
+    set_phy_tx_mode(tx_dma);
 
     Bb::r32(bb::Control) |= 0x10000000u;
     Bb::r32(bb::TxPower) &= ~3u;
     Lle::r32(lle::Control) = 2u;
 }
 
-void set_rx(RxParams *params) noexcept
+void set_rx(Frame* frame, std::uint32_t timeout) noexcept
 {
-    if (params == nullptr || params->rx_dma == 0)
+    if (frame == nullptr)
     {
         return;
     }
@@ -258,25 +256,24 @@ void set_rx(RxParams *params) noexcept
     RfEnd::r32(rfend_reg::Control2) |= 0x33000000u;
     Lle::r32(lle::PhyControl) = 0x000F01D8u;
 
-    configure_channel(params->frequency);
+    configure_channel(kLinkFrequency);
 
-    Bb::r32(bb::RxAccessAddress) = params->access_address;
+    Bb::r32(bb::RxAccessAddress)   = kLinkAccessAddress;
     Bb::r32(bb::RxAccessAddressEx) = 0u;
-    Bb::r32(bb::RxCrcInit) = params->crc_init;
-    Bb::r32(bb::RxCrcPoly) =
-        (Bb::r32(bb::RxCrcPoly) & 0xFF000000u) | (params->crc_poly & 0x00FFFFFFu);
+    Bb::r32(bb::RxCrcInit)         = kLinkCrcInit;
+    Bb::r32(bb::RxCrcPoly)         = (Bb::r32(bb::RxCrcPoly) & 0xFF000000u) | (kLinkCrcPoly & 0x00FFFFFFu);
 
-    Lle::r32(lle::Timeout) = params->time_out;
-    Lle::r32(lle::Timer) = 0;
-    Lle::r32(lle::Irq) = 0x200000u;
+    Lle::r32(lle::Timeout)         = timeout;
+    Lle::r32(lle::Timer)           = 0;
+    Lle::r32(lle::Irq)             = 0x200000u;
 
-    set_phy_rx_mode(params->rx_max_len);
+    set_phy_rx_mode(kMaxPacket);
 
     Lle::r32(lle::Control) = 1u;
 
-    if (params->time_out != 0)
+    if (timeout != 0)
     {
-        start_lle_timer(params->time_out, 0x200000u);
+        start_lle_timer(timeout, 0x200000u);
     }
 }
 
@@ -299,15 +296,15 @@ void bb_irq_handler() noexcept
     if (((control >> 6) & 1u) != 0)
     {
         Bb::r32(bb::CrcStatus) = 0x60u;
-        Lle::r32(lle::Irq) = 0x200000u;
-        Lle::r32(lle::Timer) = g_wait_recv_time;
+        Lle::r32(lle::Irq)     = 0x200000u;
+        Lle::r32(lle::Timer)   = g_wait_recv_time;
     }
 }
 
 } // namespace ch572::rf
 
-extern "C" {
-
+extern "C"
+{
 CH572_INTERRUPT CH572_HIGH_CODE void LLE_IRQHandler(void)
 {
     ch572::rf::lle_irq_handler();
@@ -317,5 +314,4 @@ CH572_INTERRUPT CH572_HIGH_CODE void BB_IRQHandler(void)
 {
     ch572::rf::bb_irq_handler();
 }
-
 }

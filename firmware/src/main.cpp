@@ -11,7 +11,7 @@ int main()
     clock::init_100mhz();
     sysreg::iwdg_start();
 
-    auto &usb = usb::UsbDevice::instance();
+    auto& usb = usb::UsbDevice::instance();
     usb.init();
 
     rf_uart::RfUart rf(usb);

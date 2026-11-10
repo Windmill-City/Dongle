@@ -1,69 +1,76 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 #include "ch572/compiler.hpp"
 
-namespace ch572::rf {
+namespace ch572::rf
+{
 
-using RoleEvent = std::uint32_t;
-using ProcessCallback = void (*)(RoleEvent event);
+using RoleEvent                                   = std::uint32_t;
+using ProcessCallback                             = void (*)(RoleEvent event);
 
 // Events reported to the role callback. These are deliberately independent
 // from the raw LLE IRQ bits, which are decoded inside rfip.cpp.
-inline constexpr RoleEvent kEventRx = 1u << 0;
-inline constexpr RoleEvent kEventCrcError = 1u << 1;
-inline constexpr RoleEvent kEventTxFinish = 1u << 2;
-inline constexpr RoleEvent kEventTimeout = 1u << 3;
+inline constexpr RoleEvent     kEventRx           = 1u << 0;
+inline constexpr RoleEvent     kEventCrcError     = 1u << 1;
+inline constexpr RoleEvent     kEventTxFinish     = 1u << 2;
+inline constexpr RoleEvent     kEventTimeout      = 1u << 3;
 
-inline constexpr std::uint8_t kTxPowerMinus25Dbm = 0x01;
-inline constexpr std::uint8_t kTxPowerMinus20Dbm = 0x02;
-inline constexpr std::uint8_t kTxPowerMinus15Dbm = 0x03;
-inline constexpr std::uint8_t kTxPowerMinus10Dbm = 0x05;
-inline constexpr std::uint8_t kTxPowerMinus8Dbm = 0x07;
-inline constexpr std::uint8_t kTxPowerMinus5Dbm = 0x0A;
-inline constexpr std::uint8_t kTxPowerMinus3Dbm = 0x0C;
-inline constexpr std::uint8_t kTxPowerMinus1Dbm = 0x10;
-inline constexpr std::uint8_t kTxPower0Dbm = 0x12;
-inline constexpr std::uint8_t kTxPower1Dbm = 0x15;
-inline constexpr std::uint8_t kTxPower2Dbm = 0x18;
-inline constexpr std::uint8_t kTxPower3Dbm = 0x1B;
-inline constexpr std::uint8_t kTxPower4Dbm = 0x1F;
-inline constexpr std::uint8_t kTxPower5Dbm = 0x25;
-inline constexpr std::uint8_t kTxPower6Dbm = 0x2D;
+inline constexpr std::uint8_t  kTxPowerMinus25Dbm = 0x01;
+inline constexpr std::uint8_t  kTxPowerMinus20Dbm = 0x02;
+inline constexpr std::uint8_t  kTxPowerMinus15Dbm = 0x03;
+inline constexpr std::uint8_t  kTxPowerMinus10Dbm = 0x05;
+inline constexpr std::uint8_t  kTxPowerMinus8Dbm  = 0x07;
+inline constexpr std::uint8_t  kTxPowerMinus5Dbm  = 0x0A;
+inline constexpr std::uint8_t  kTxPowerMinus3Dbm  = 0x0C;
+inline constexpr std::uint8_t  kTxPowerMinus1Dbm  = 0x10;
+inline constexpr std::uint8_t  kTxPower0Dbm       = 0x12;
+inline constexpr std::uint8_t  kTxPower1Dbm       = 0x15;
+inline constexpr std::uint8_t  kTxPower2Dbm       = 0x18;
+inline constexpr std::uint8_t  kTxPower3Dbm       = 0x1B;
+inline constexpr std::uint8_t  kTxPower4Dbm       = 0x1F;
+inline constexpr std::uint8_t  kTxPower5Dbm       = 0x25;
+inline constexpr std::uint8_t  kTxPower6Dbm       = 0x2D;
 
-struct RoleConfig
+// Fixed link configuration for the transparent UART bridge.
+inline constexpr std::uint32_t kLinkFrequency     = 17;
+inline constexpr std::uint32_t kLinkAccessAddress = 0x57250425u;
+inline constexpr std::uint32_t kLinkCrcInit       = 0x555555u;
+inline constexpr std::uint32_t kLinkCrcPoly       = 0x80032Du;
+inline constexpr std::uint8_t  kLinkTxPower       = kTxPower0Dbm;
+inline constexpr std::uint8_t  kRfOnUs            = 20;
+inline constexpr std::uint8_t  kLinkWaitTime      = static_cast<std::uint8_t>(kRfOnUs * 2u);
+
+// Packet header at the DMA base. The hardware takes the payload length from
+// the second byte of the first word, so `length` must stay at offset 1.
+struct CH572_PACKED Packet
 {
-    ProcessCallback process_cb;
+    std::uint8_t type    : 4;
+    std::uint8_t sequence: 4;
+    std::uint8_t length;
 };
 
-// The link always uses the 2 Mbps PHY and a channel index (0..63), so the
-// parameters only carry what the transmit and receive paths actually need.
-struct TxParams
+static_assert(sizeof(Packet) == 2, "RF packet header is two bytes");
+
+inline constexpr std::size_t  kMaxPayload = 64;
+inline constexpr std::uint8_t kMaxPacket  = static_cast<std::uint8_t>(kMaxPayload + sizeof(Packet));
+
+// One DMA frame: packet header followed by the payload. TX and RX share the
+// layout; on RX only bytes up to packet.length are valid.
+struct alignas(4) Frame
 {
-    std::uint32_t access_address;
-    std::uint32_t crc_init;
-    std::uint32_t frequency;
-    std::uint32_t tx_dma;
-    std::uint8_t wait_time;
-    std::int8_t tx_power;
-    std::uint32_t crc_poly;
+    Packet       packet;
+    std::uint8_t payload[kMaxPayload];
 };
 
-struct RxParams
-{
-    std::uint32_t access_address;
-    std::uint32_t crc_init;
-    std::uint32_t frequency;
-    std::uint32_t rx_dma;
-    std::uint8_t rx_max_len;
-    std::uint32_t time_out;
-    std::uint32_t crc_poly;
-};
+static_assert(offsetof(Frame, payload) == sizeof(Packet), "RF payload is contiguous");
+static_assert(sizeof(Frame) == 68, "RF frame is header plus payload");
 
-void role_init(RoleConfig *config) noexcept;
-CH572_HIGH_CODE void start_tx(TxParams *params) noexcept;
-CH572_HIGH_CODE void set_rx(RxParams *params) noexcept;
+void                 role_init(ProcessCallback process_cb) noexcept;
+CH572_HIGH_CODE void start_tx(Frame* frame) noexcept;
+CH572_HIGH_CODE void set_rx(Frame* frame, std::uint32_t timeout) noexcept;
 
 CH572_HIGH_CODE void lle_irq_handler() noexcept;
 CH572_HIGH_CODE void bb_irq_handler() noexcept;

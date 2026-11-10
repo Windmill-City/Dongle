@@ -6,22 +6,23 @@
 #include "ch572/compiler.hpp"
 #include "ch572/platform/registers.hpp"
 
-namespace ch572 {
+namespace ch572
+{
 
 // The WCH core has a byte-oriented block copy instruction.  It is used here so
 // the interrupt-side ring buffer does not need to call into libc.
-inline void wch_mcpy(void *dst, const void *src, std::size_t length) noexcept
+inline void wch_mcpy(void* dst, const void* src, std::size_t length) noexcept
 {
-    auto *d = static_cast<std::uint8_t *>(dst);
-    auto *s = const_cast<std::uint8_t *>(static_cast<const std::uint8_t *>(src));
-    auto *end = s + length;
+    auto* d   = static_cast<std::uint8_t*>(dst);
+    auto* s   = const_cast<std::uint8_t*>(static_cast<const std::uint8_t*>(src));
+    auto* end = s + length;
     asm volatile("mcpy %2, %0, %1" : "+r"(s), "+r"(d) : "r"(end) : "memory");
 }
 
 template <std::size_t N>
 class RingBuffer
 {
-public:
+  public:
     static_assert(N > 0, "RingBuffer must have storage");
 
     std::size_t size() const noexcept
@@ -30,9 +31,12 @@ public:
         return m_count;
     }
 
-    bool empty() const noexcept { return size() == 0; }
+    bool empty() const noexcept
+    {
+        return size() == 0;
+    }
 
-    std::size_t write(const void *src, std::size_t length) noexcept
+    std::size_t write(const void* src, std::size_t length) noexcept
     {
         if (src == nullptr || length == 0)
         {
@@ -60,9 +64,7 @@ public:
         else
         {
             wch_mcpy(&m_pool[m_write], src, first);
-            wch_mcpy(&m_pool[0],
-                     static_cast<const std::uint8_t *>(src) + first,
-                     length - first);
+            wch_mcpy(&m_pool[0], static_cast<const std::uint8_t*>(src) + first, length - first);
             m_write = length - first;
         }
 
@@ -71,7 +73,7 @@ public:
         return length;
     }
 
-    std::size_t read(void *dst, std::size_t length) noexcept
+    std::size_t read(void* dst, std::size_t length) noexcept
     {
         if (dst == nullptr)
         {
@@ -105,9 +107,7 @@ public:
         else
         {
             wch_mcpy(dst, &m_pool[m_read], first);
-            wch_mcpy(static_cast<std::uint8_t *>(dst) + first,
-                     &m_pool[0],
-                     length - first);
+            wch_mcpy(static_cast<std::uint8_t*>(dst) + first, &m_pool[0], length - first);
             m_read = length - first;
         }
 
@@ -116,10 +116,10 @@ public:
         return length;
     }
 
-private:
-    std::uint8_t m_pool[N]{};
-    std::size_t m_write = 0;
-    std::size_t m_read = 0;
+  private:
+    std::uint8_t         m_pool[N]{};
+    std::size_t          m_write = 0;
+    std::size_t          m_read  = 0;
     volatile std::size_t m_count = 0;
 };
 
