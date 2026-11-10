@@ -26,8 +26,8 @@ void dev_init() noexcept
 {
     RfEnd::r32(off::TxBias)        = 1152;
     RfEnd::r32(off::Power)         = (RfEnd::r32(off::Power) & 0xFFFF0FFFu) | 0x00008000u;
-    RfEnd::r32(off::TxControl)     = (RfEnd::r32(off::TxControl) & 0xFFFFCFFFu) | 0x00001000u;
-    RfEnd::r32(off::TxControl)     = (RfEnd::r32(off::TxControl) & 0xFFFCFFFFu) | 0x00010000u;
+    RfEnd::r32(off::TxControl1)     = (RfEnd::r32(off::TxControl1) & 0xFFFFCFFFu) | 0x00001000u;
+    RfEnd::r32(off::TxControl1)     = (RfEnd::r32(off::TxControl1) & 0xFFFCFFFFu) | 0x00010000u;
     RfEnd::r32(off::Power)         = (RfEnd::r32(off::Power) & 0xF8FFFFFFu) | 0x20000000u;
     RfEnd::r32(off::Power)         = (RfEnd::r32(off::Power) & 0x1FFFFFFFu) | 0x00040000u;
     RfEnd::r32(off::TxControl2)    = RfEnd::r32(off::TxControl2) & 0xFFF9FFFFu;
@@ -113,7 +113,7 @@ void tx_ctune() noexcept
 {
     RfEnd::r32(off::Control1) &= ~0x100u;
     RfEnd::r32(off::TxBias) &= ~0x1000u;
-    RfEnd::r32(off::TxControl) &= ~0x10u;
+    RfEnd::r32(off::TxControl1) &= ~0x10u;
     RfEnd::r32(off::Control2) |= 0x00020000u;
     RfEnd::r32(off::Control1) |= 0x10u;
 
@@ -123,7 +123,7 @@ void tx_ctune() noexcept
     RfEnd::r32(off::Control1) &= ~0x10u;
     RfEnd::r32(off::Control1) &= ~1u;
     RfEnd::r32(off::TxBias) |= 0x1000u;
-    RfEnd::r32(off::TxControl) |= 0x10u;
+    RfEnd::r32(off::TxControl1) |= 0x10u;
     RfEnd::r32(off::DacRef) = (RfEnd::r32(off::DacRef) & ~0x3Fu) | (g_nco2440 & 0x3Fu);
     RfEnd::r32(off::DacRef) = (RfEnd::r32(off::DacRef) & 0x80FFFFFFu) | (static_cast<std::uint32_t>(g_nco2440) << 24);
 }

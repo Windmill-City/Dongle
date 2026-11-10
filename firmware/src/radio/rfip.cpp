@@ -51,7 +51,7 @@ CH572_HIGH_CODE void start_lle_timer(std::uint32_t total, std::uint32_t bit) noe
 
 CH572_HIGH_CODE void configure_channel(std::uint32_t channel) noexcept
 {
-    RfEnd::r32(rfend_reg::TxControl) &= ~2u;
+    RfEnd::r32(rfend_reg::TxControl1) &= ~2u;
     Bb::r32(bb::Control) = (Bb::r32(bb::Control) & 0xFFFFFF80u) | (channel & 0x7Fu);
 }
 
