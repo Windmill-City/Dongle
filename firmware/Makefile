@@ -23,10 +23,10 @@ COMMON_CXX    := src/platform/gpio.cpp src/platform/clock.cpp \
 APP_CXX       := src/main.cpp src/platform/systick.cpp \
                  src/platform/flash.cpp src/boot/iap_update.cpp \
                  src/hal/led.cpp \
-                 src/usb/ch341.cpp \
+                 src/usb/usb_device.cpp \
                  src/radio/rfip.cpp src/radio/rf_uart.cpp src/radio/rfend.cpp
 IAP_CXX       := src/boot/iap_main.cpp src/boot/iap_update.cpp \
-                 src/usb/ch341.cpp src/platform/systick.cpp
+                 src/usb/usb_device.cpp src/platform/systick.cpp
 
 LDSCRIPT      := ld/ch572.ld
 LD_DEFS_APP   := -Wl,--defsym=FLASH_ORIGIN=0x00002000 -Wl,--defsym=FLASH_LENGTH=0x0003A000

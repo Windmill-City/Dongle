@@ -1,4 +1,4 @@
-#include "ch572/usb/ch341.hpp"
+#include "ch572/usb/usb_device.hpp"
 
 #include <cstring>
 
@@ -9,34 +9,31 @@
 namespace ch572::usb {
 namespace {
 
-constexpr std::uint8_t kRequestDebugRead = 0x95;
-constexpr std::uint8_t kRequestDebugWrite = 0x9A;
-constexpr std::uint8_t kRequestUartInit = 0xA1;
-constexpr std::uint8_t kRequestUartModemOut = 0xA4;
-constexpr std::uint8_t kRequestGetVersion = 0x5F;
+// CDC ACM class requests.
+constexpr std::uint8_t kCdcSetLineCoding = 0x20;
+constexpr std::uint8_t kCdcGetLineCoding = 0x21;
+constexpr std::uint8_t kCdcSetControlLineState = 0x22;
+constexpr std::uint8_t kCdcSendBreak = 0x23;
 
-// Out-of-band upgrade control. A vendor control request cannot collide with
-// the transparent RF data stream, so no byte pattern in the payload can enter
-// an upgrade mode. Data itself uses the normal CH341 serial endpoint.
-constexpr std::uint8_t kRequestIapControl = 0xB1;
-constexpr std::uint8_t kIapMarker = 0x5A;
-constexpr std::uint8_t kIapTokenLow = 0x41;
-constexpr std::uint8_t kIapTokenHigh = 0x49;
+// HID class requests.
+constexpr std::uint8_t kHidGetReport = 0x01;
+constexpr std::uint8_t kHidGetIdle = 0x02;
+constexpr std::uint8_t kHidGetProtocol = 0x03;
+constexpr std::uint8_t kHidSetReport = 0x09;
+constexpr std::uint8_t kHidSetIdle = 0x0A;
+constexpr std::uint8_t kHidSetProtocol = 0x0B;
+
+// Feature report ID 1: command, marker, "IAP", padding. The marker keeps a
+// stray report from a generic HID tool from arming an upgrade.
+constexpr std::uint8_t kHidMarker = 0x5A;
+constexpr std::uint8_t kHidTokenI = 'I';
+constexpr std::uint8_t kHidTokenA = 'A';
+constexpr std::uint8_t kHidTokenP = 'P';
 constexpr std::uint8_t kIapCommandAppUpdate = 0x01;
 constexpr std::uint8_t kIapCommandBootUpdate = 0x02;
-
-constexpr std::uint8_t kClassSetLineCoding = 0x20;
-constexpr std::uint8_t kClassGetLineCoding = 0x21;
-constexpr std::uint8_t kClassSetControlLineState = 0x22;
-constexpr std::uint8_t kClassSerialState = 0x20;
-
-constexpr std::uint8_t kUart1Stop = 1;
-constexpr std::uint8_t kUart2Stop = 2;
-constexpr std::uint8_t kParityNone = 0x00;
-constexpr std::uint8_t kParityOdd = 0x01;
-constexpr std::uint8_t kParityEven = 0x02;
-constexpr std::uint8_t kParityMark = 0x03;
-constexpr std::uint8_t kParitySpace = 0x04;
+constexpr std::uint8_t kHidStatusOk = 0x00;
+constexpr std::uint8_t kHidStatusInvalid = 0x01;
+constexpr std::uint8_t kHidStatusUnknownCommand = 0x02;
 
 constexpr std::uint8_t kStall = 0xFF;
 constexpr std::uint8_t kTokenOut = 0x00;
@@ -45,19 +42,22 @@ constexpr std::uint8_t kToggleOk = 0x40;
 
 } // namespace
 
-Ch341Serial &Ch341Serial::instance()
+UsbDevice &UsbDevice::instance()
 {
-    static Ch341Serial serial;
-    return serial;
+    static UsbDevice device;
+    return device;
 }
 
-void Ch341Serial::init()
+void UsbDevice::init()
 {
     sysreg::pin_alternate() &= ~sysreg::kPinDebugEnable;
     m_app_update_request = false;
     m_boot_update_request = false;
+    m_hid_report_pending = false;
+    m_hid_status = kHidStatusOk;
+    m_hid_command = 0;
     device_parameters_init();
-    vendor_init();
+    endpoint_init();
     enable_irq(Irq::Usb);
 
     // WCH implements the global interrupt enable in the custom CSR 0x800
@@ -69,17 +69,20 @@ void Ch341Serial::init()
     asm volatile("csrw 0x800, %0" : : "r"(kGlobalIrqEnable) : "memory");
 }
 
-void Ch341Serial::vendor_init()
+void UsbDevice::endpoint_init()
 {
     usbreg::ctrl() = 0;
-    // EP1 is an IN-only status endpoint; enabling RX here would need a
-    // second 64-byte buffer that nothing uses.
+
+    // EP1 is the CDC ACM notification endpoint, EP2 is the CDC data pair, and
+    // EP3 is the HID interrupt IN endpoint.
     usbreg::ep4_1_mod() = usbreg::kUep1TxEn;
-    usbreg::ep2_3_mod() = usbreg::kUep2RxEn | usbreg::kUep2TxEn;
+    usbreg::ep2_3_mod() = usbreg::kUep2RxEn | usbreg::kUep2TxEn |
+                          usbreg::kUep3TxEn;
 
     usbreg::ep0_dma() = static_cast<std::uint16_t>(reinterpret_cast<std::uintptr_t>(&m_ep0_buffer[0]));
     usbreg::ep1_dma() = static_cast<std::uint16_t>(reinterpret_cast<std::uintptr_t>(&m_ep1_buffer[0]));
     usbreg::ep2_dma() = static_cast<std::uint16_t>(reinterpret_cast<std::uintptr_t>(&m_ep2_buffer[0]));
+    usbreg::ep3_dma() = static_cast<std::uint16_t>(reinterpret_cast<std::uintptr_t>(&m_ep3_buffer[0]));
 
     // EP0 must receive (ACK) so the host's first SETUP (GET_DESCRIPTOR) is
     // accepted. With RX=NAK the packet is rejected and enumeration never
@@ -87,6 +90,7 @@ void Ch341Serial::vendor_init()
     usbreg::ep0_ctrl() = usbreg::kUepRResAck | usbreg::kUepTResNak;
     usbreg::ep1_ctrl() = usbreg::kUepRResAck | usbreg::kUepTResNak;
     usbreg::ep2_ctrl() = usbreg::kUepRResAck | usbreg::kUepTResNak;
+    usbreg::ep3_ctrl() = usbreg::kUepRResNak | usbreg::kUepTResNak;
 
     usbreg::dev_addr() = 0;
     usbreg::dev_ctrl() = usbreg::kUdPdDis;
@@ -102,23 +106,17 @@ void Ch341Serial::vendor_init()
     m_device_info = DeviceInfo{};
 }
 
-void Ch341Serial::device_parameters_init()
+void UsbDevice::device_parameters_init()
 {
     m_line_coding.baud_rate = 115200;
     m_line_coding.data_bits = 8;
-    m_line_coding.parity = kParityNone;
-    m_line_coding.stop_bits = kUart1Stop;
-    m_line_coding.io_status = 0;
+    m_line_coding.parity = 0;
+    m_line_coding.stop_bits = 1;
+    m_line_coding.line_state = 0;
     m_line_coding_changed = true;
-
-    for (std::size_t i = 0; i < kCh341RegisterCount; ++i)
-    {
-        m_ch341_register_address[i] = 0xFF;
-        m_ch341_register_value[i] = 0x00;
-    }
 }
 
-void Ch341Serial::handle_setup()
+void UsbDevice::handle_setup()
 {
     auto *setup = reinterpret_cast<SetupRequest *>(m_ep0_buffer);
     std::uint8_t data_direction = kRequestTypeIn;
@@ -137,119 +135,45 @@ void Ch341Serial::handle_setup()
     }
 
     const std::uint8_t request_type = setup->request_type & kRequestTypeMask;
+    m_setup_type = request_type;
 
-    if (request_type == kRequestTypeVendor)
-    {
-        switch (m_setup_request)
-        {
-        case kRequestDebugWrite:
-        {
-            const std::uint8_t address1 = m_ep0_buffer[2];
-            const std::uint8_t address2 = m_ep0_buffer[3];
-            const std::uint8_t value1 = m_ep0_buffer[4];
-            const std::uint8_t value2 = m_ep0_buffer[5];
-
-            if (address1 == 0x12 && address2 == 0x13)
-            {
-                m_line_coding.baud_rate = ch341_baud_rate(setup->index_l, setup->index_h);
-                m_line_coding_changed = true;
-            }
-            else
-            {
-                ch341_register_write(address1, value1);
-                ch341_register_write(address2, value2);
-            }
-            break;
-        }
-
-        case kRequestDebugRead:
-        {
-            std::uint8_t value1 = 0;
-            std::uint8_t value2 = 0;
-            ch341_register_read(setup->value_l, &value1);
-            ch341_register_read(setup->value_h, &value2);
-            length = 2;
-            m_ep0_buffer[0] = value1;
-            m_ep0_buffer[1] = value2;
-            m_setup_length = length;
-            break;
-        }
-
-        case kRequestUartInit:
-        {
-            if ((m_ep0_buffer[2] & 0x80u) != 0)
-            {
-                parse_line_coding(m_ep0_buffer[3]);
-                std::uint8_t divider_high = setup->index_l;
-                if ((divider_high & (1u << 6)) == 0)
-                {
-                    divider_high &= 0xC7u;
-                }
-                m_line_coding.baud_rate = ch341_baud_rate(divider_high, setup->index_h);
-                m_line_coding_changed = true;
-            }
-            break;
-        }
-
-        case kRequestUartModemOut:
-        {
-            m_line_coding.io_status = m_ep0_buffer[2];
-            m_line_coding_changed = true;
-            break;
-        }
-
-        case kRequestGetVersion:
-        {
-            length = 2;
-            m_ep0_buffer[0] = 0x30;
-            m_ep0_buffer[1] = 0x00;
-            m_setup_length = length;
-            break;
-        }
-
-        case kRequestIapControl:
-        {
-            // bmRequestType = 0x40 (vendor, host-to-device, device).
-            // wValue = 0x5A01 (app update) or 0x5A02 (boot region update).
-            // wIndex = 0x4941 acts as a token so stray vendor requests from a
-            // generic driver cannot arm the device.
-            const bool valid = data_direction == 0 && setup->length_l == 0 &&
-                               setup->length_h == 0 &&
-                               setup->value_h == kIapMarker &&
-                               setup->index_l == kIapTokenLow &&
-                               setup->index_h == kIapTokenHigh;
-            if (valid && setup->value_l == kIapCommandAppUpdate)
-            {
-                m_app_update_request = true;
-            }
-            else if (valid && setup->value_l == kIapCommandBootUpdate)
-            {
-                m_boot_update_request = true;
-            }
-            break;
-        }
-
-        default:
-            break;
-        }
-    }
-    else if (request_type == kRequestTypeStandard)
+    if (request_type == kRequestTypeStandard)
     {
         switch (m_setup_request)
         {
         case kReqGetDescriptor:
         {
-            const std::uint8_t *descriptor =
-                find_descriptor(kDescriptors, setup->value_h, setup->value_l);
+            const std::uint8_t type = setup->value_h;
+            const std::uint8_t *descriptor = nullptr;
+            std::uint8_t descriptor_length = 0;
+
+            if (type == kDescriptorHid)
+            {
+                descriptor = kHidDescriptor;
+                descriptor_length = sizeof(kHidDescriptor);
+            }
+            else if (type == kDescriptorHidReport)
+            {
+                descriptor = kHidReportDescriptor;
+                descriptor_length = sizeof(kHidReportDescriptor);
+            }
+            else
+            {
+                descriptor = find_descriptor(kDescriptors, type, setup->value_l);
+                if (descriptor != nullptr)
+                {
+                    descriptor_length = descriptor[0];
+                }
+            }
+
             if (descriptor == nullptr)
             {
                 length = kStall;
                 break;
             }
 
-            // bLength is the first byte of every USB descriptor.
             m_descriptor = descriptor;
-            length = descriptor[0];
+            length = descriptor_length;
             if (m_setup_length > length)
             {
                 m_setup_length = length;
@@ -282,6 +206,7 @@ void Ch341Serial::handle_setup()
             {
                 usbreg::ep1_ctrl() = (usbreg::ep1_ctrl() & ~(usbreg::kUepTTog | usbreg::kMaskUepTRes)) | usbreg::kUepTResNak;
                 usbreg::ep2_ctrl() = (usbreg::ep2_ctrl() & ~(usbreg::kUepTTog | usbreg::kMaskUepTRes)) | usbreg::kUepTResNak;
+                usbreg::ep3_ctrl() = (usbreg::ep3_ctrl() & ~(usbreg::kUepTTog | usbreg::kMaskUepTRes)) | usbreg::kUepTResNak;
             }
             else if ((setup->request_type & kRecipientMask) == kRecipientEndpoint)
             {
@@ -295,6 +220,9 @@ void Ch341Serial::handle_setup()
                     break;
                 case 0x81:
                     usbreg::ep1_ctrl() = (usbreg::ep1_ctrl() & ~(usbreg::kUepTTog | usbreg::kMaskUepTRes)) | usbreg::kUepTResNak;
+                    break;
+                case 0x83:
+                    usbreg::ep3_ctrl() = (usbreg::ep3_ctrl() & ~(usbreg::kUepTTog | usbreg::kMaskUepTRes)) | usbreg::kUepTResNak;
                     break;
                 default:
                     length = kStall;
@@ -328,14 +256,61 @@ void Ch341Serial::handle_setup()
     }
     else if (request_type == kRequestTypeClass)
     {
-        if (data_direction == 0)
+        if (setup->index_l == kHidInterface)
         {
             switch (m_setup_request)
             {
-            case kClassSetLineCoding:
-            case kClassSetControlLineState:
-                length = 0;
+            case kHidGetReport:
+                if (data_direction != 0)
+                {
+                    length = static_cast<std::uint8_t>(kHidTransferSize);
+                    m_ep0_buffer[0] = kHidStatusReportId;
+                    m_ep0_buffer[1] = m_hid_status;
+                    m_ep0_buffer[2] = m_hid_command;
+                    for (std::size_t i = 3; i < kHidTransferSize; ++i)
+                    {
+                        m_ep0_buffer[i] = 0;
+                    }
+                }
+                else
+                {
+                    length = kStall;
+                }
                 break;
+
+            case kHidSetReport:
+                length = data_direction == 0 ? 0 : kStall;
+                break;
+
+            case kHidGetIdle:
+                if (data_direction != 0)
+                {
+                    m_ep0_buffer[0] = 0;
+                    length = 1;
+                }
+                else
+                {
+                    length = kStall;
+                }
+                break;
+
+            case kHidSetIdle:
+            case kHidSetProtocol:
+                length = data_direction == 0 ? 0 : kStall;
+                break;
+
+            case kHidGetProtocol:
+                if (data_direction != 0)
+                {
+                    m_ep0_buffer[0] = 1;
+                    length = 1;
+                }
+                else
+                {
+                    length = kStall;
+                }
+                break;
+
             default:
                 length = kStall;
                 break;
@@ -345,17 +320,39 @@ void Ch341Serial::handle_setup()
         {
             switch (m_setup_request)
             {
-            case kClassGetLineCoding:
-            {
-                length = static_cast<std::uint8_t>(sizeof(LineCoding));
-                std::memcpy(m_ep0_buffer, &m_line_coding, sizeof(LineCoding));
+            case kCdcSetLineCoding:
+                length = data_direction == 0 ? 0 : kStall;
                 break;
-            }
-            case kClassSerialState:
-                length = 2;
-                m_ep0_buffer[0] = 0;
-                m_ep0_buffer[1] = 0;
+
+            case kCdcGetLineCoding:
+                if (data_direction != 0)
+                {
+                    length = static_cast<std::uint8_t>(kCdcLineCodingSize);
+                    std::memcpy(m_ep0_buffer, &m_line_coding, kCdcLineCodingSize);
+                }
+                else
+                {
+                    length = kStall;
+                }
                 break;
+
+            case kCdcSetControlLineState:
+                if (data_direction == 0)
+                {
+                    m_line_coding.line_state = setup->value_l & 0x03u;
+                    m_line_coding_changed = true;
+                    length = 0;
+                }
+                else
+                {
+                    length = kStall;
+                }
+                break;
+
+            case kCdcSendBreak:
+                length = data_direction == 0 ? 0 : kStall;
+                break;
+
             default:
                 length = kStall;
                 break;
@@ -384,7 +381,57 @@ void Ch341Serial::handle_setup()
                          rx_response | usbreg::kUepTResAck;
 }
 
-void Ch341Serial::irq_handler()
+void UsbDevice::handle_hid_report(std::uint8_t length)
+{
+    std::uint8_t status = kHidStatusInvalid;
+    std::uint8_t command = 0;
+
+    if (length >= 6 && m_ep0_buffer[0] == kHidReportId)
+    {
+        command = m_ep0_buffer[1];
+        const bool valid =
+            m_ep0_buffer[2] == kHidMarker &&
+            m_ep0_buffer[3] == kHidTokenI &&
+            m_ep0_buffer[4] == kHidTokenA &&
+            m_ep0_buffer[5] == kHidTokenP;
+
+        if (valid)
+        {
+            switch (command)
+            {
+            case kIapCommandAppUpdate:
+                m_app_update_request = true;
+                status = kHidStatusOk;
+                break;
+            case kIapCommandBootUpdate:
+                m_boot_update_request = true;
+                status = kHidStatusOk;
+                break;
+            default:
+                status = kHidStatusUnknownCommand;
+                break;
+            }
+        }
+    }
+
+    queue_hid_status(status, command);
+}
+
+void UsbDevice::queue_hid_status(std::uint8_t status, std::uint8_t command)
+{
+    m_hid_status = status;
+    m_hid_command = command;
+    m_ep3_buffer[0] = kHidStatusReportId;
+    m_ep3_buffer[1] = status;
+    m_ep3_buffer[2] = command;
+    for (std::size_t i = 3; i < kHidTransferSize; ++i)
+    {
+        m_ep3_buffer[i] = 0;
+    }
+    m_hid_report_pending = true;
+}
+
+void UsbDevice::irq_handler()
 {
     if ((usbreg::int_fg() & usbreg::kUifTransfer) != 0)
     {
@@ -419,17 +466,31 @@ void Ch341Serial::irq_handler()
                 usbreg::ep1_ctrl() = (usbreg::ep1_ctrl() & 0xFCu) | kInNak;
                 break;
 
+            case kTokenIn | 3:
+                usbreg::ep3_ctrl() ^= usbreg::kUepTTog;
+                usbreg::ep3_ctrl() = (usbreg::ep3_ctrl() & ~usbreg::kMaskUepTRes) | kInNak;
+                break;
+
             case kTokenOut | 0:
                 if (toggle_ok)
                 {
                     usbreg::ep0_ctrl() = (usbreg::ep0_ctrl() & 0xF3u) | 0x08u;
-                    if (length != 0 && m_setup_request == kClassSetLineCoding)
+                    if (length != 0 && m_setup_type == kRequestTypeClass &&
+                        m_setup_request == kCdcSetLineCoding &&
+                        length >= kCdcLineCodingSize)
                     {
                         std::memcpy(&m_line_coding.baud_rate, m_ep0_buffer, 4);
                         m_line_coding.stop_bits = m_ep0_buffer[4];
                         m_line_coding.parity = m_ep0_buffer[5];
                         m_line_coding.data_bits = m_ep0_buffer[6];
                         m_line_coding_changed = true;
+                        usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
+                                             usbreg::kUepRResNak | usbreg::kUepTResAck;
+                    }
+                    else if (length != 0 && m_setup_type == kRequestTypeClass &&
+                             m_setup_request == kHidSetReport)
+                    {
+                        handle_hid_report(length);
                         usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
                                              usbreg::kUepRResNak | usbreg::kUepTResAck;
                     }
@@ -466,12 +527,14 @@ void Ch341Serial::irq_handler()
     {
         // After a bus reset EP0 must be ready to receive the host's SETUP
         // (ACK), otherwise the first GET_DESCRIPTOR is NAKed and enumeration
-        // never starts. This matches the working IAP bootloader.
+        // never starts.
         usbreg::ep0_ctrl() = usbreg::kUepRResAck | usbreg::kUepTResNak;
         usbreg::ep1_ctrl() = usbreg::kUepRResAck | usbreg::kUepTResNak;
         usbreg::ep2_ctrl() = usbreg::kUepRResAck | usbreg::kUepTResNak;
+        usbreg::ep3_ctrl() = usbreg::kUepRResNak | usbreg::kUepTResNak;
         usbreg::dev_addr() = 0;
         m_device_info.address = 0;
+        m_hid_report_pending = false;
         usbreg::int_fg() = usbreg::kUifBusReset;
     }
     else if ((usbreg::int_fg() & usbreg::kUifSuspend) != 0)
@@ -480,8 +543,35 @@ void Ch341Serial::irq_handler()
     }
 }
 
-void Ch341Serial::handle_ep0_in()
+void UsbDevice::handle_ep0_in()
 {
+    if (m_setup_type == kRequestTypeClass)
+    {
+        switch (m_setup_request)
+        {
+        case kCdcGetLineCoding:
+        case kHidGetReport:
+        case kHidGetIdle:
+        case kHidGetProtocol:
+            usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
+                                 usbreg::kUepRResAck | usbreg::kUepTResNak;
+            return;
+
+        case kCdcSetLineCoding:
+        case kCdcSetControlLineState:
+        case kCdcSendBreak:
+        case kHidSetReport:
+        case kHidSetIdle:
+        case kHidSetProtocol:
+            usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
+                                 usbreg::kUepRResNak | usbreg::kUepTResNak;
+            return;
+
+        default:
+            break;
+        }
+    }
+
     switch (m_setup_request)
     {
     case kReqGetDescriptor:
@@ -512,18 +602,6 @@ void Ch341Serial::handle_ep0_in()
                              usbreg::kUepRResNak | usbreg::kUepTResNak;
         break;
 
-    case kRequestDebugRead:
-    case kRequestGetVersion:
-    case kClassGetLineCoding:
-        usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
-                             usbreg::kUepRResAck | usbreg::kUepTResNak;
-        break;
-
-    case kClassSetLineCoding:
-        usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
-                             usbreg::kUepRResNak | usbreg::kUepTResNak;
-        break;
-
     default:
         usbreg::ep0_t_len() = 0;
         usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
@@ -532,11 +610,20 @@ void Ch341Serial::handle_ep0_in()
     }
 }
 
-void Ch341Serial::poll()
+void UsbDevice::poll()
 {
     if (!enumerated())
     {
         return;
+    }
+
+    if (m_hid_report_pending &&
+        (usbreg::ep3_ctrl() & usbreg::kMaskUepTRes) == usbreg::kUepTResNak)
+    {
+        usbreg::ep3_t_len() = static_cast<std::uint8_t>(kHidTransferSize);
+        usbreg::ep3_ctrl() = (usbreg::ep3_ctrl() & ~usbreg::kMaskUepTRes) |
+                             usbreg::kUepTResAck;
+        m_hid_report_pending = false;
     }
 
     if ((usbreg::ep2_ctrl() & usbreg::kMaskUepTRes) == usbreg::kUepTResNak)
@@ -555,7 +642,7 @@ void Ch341Serial::poll()
     }
 }
 
-HostReadResult Ch341Serial::read_host(void *dst, std::size_t max_length)
+HostReadResult UsbDevice::read_host(void *dst, std::size_t max_length)
 {
     if (enumerated() && m_line_coding_changed)
     {
@@ -576,133 +663,9 @@ HostReadResult Ch341Serial::read_host(void *dst, std::size_t max_length)
     return {HostReadStatus::no_data, 0};
 }
 
-void Ch341Serial::set_source(ByteSource *source) noexcept
+void UsbDevice::set_source(ByteSource *source) noexcept
 {
     m_source = source;
-}
-
-void Ch341Serial::parse_line_coding(std::uint8_t value)
-{
-    static constexpr std::uint8_t kDataBits[4] = {5, 6, 7, 8};
-
-    std::uint8_t parity;
-    switch (value & 0x38u)
-    {
-    case 0x00: parity = kParityNone; break;
-    case 0x08: parity = kParityOdd; break;
-    case 0x18: parity = kParityEven; break;
-    case 0x28: parity = kParityMark; break;
-    default: parity = kParitySpace; break;
-    }
-
-    m_line_coding.stop_bits = (value & 0x04u) != 0 ? kUart2Stop : kUart1Stop;
-    m_line_coding.parity = parity;
-    m_line_coding.data_bits = kDataBits[value & 0x03u];
-}
-
-void Ch341Serial::ch341_register_write(std::uint8_t address, std::uint8_t value)
-{
-    for (std::size_t i = 0; i < kCh341RegisterCount; ++i)
-    {
-        if (m_ch341_register_address[i] == address ||
-            m_ch341_register_address[i] == 0xFF)
-        {
-            m_ch341_register_address[i] = address;
-            m_ch341_register_value[i] = value;
-            break;
-        }
-    }
-
-    if (address == 0x18)
-    {
-        parse_line_coding(value);
-    }
-}
-
-void Ch341Serial::ch341_register_read(std::uint8_t address, std::uint8_t *value) const
-{
-    *value = 0;
-    for (std::size_t i = 0; i < kCh341RegisterCount; ++i)
-    {
-        if (m_ch341_register_address[i] == address)
-        {
-            *value = m_ch341_register_value[i];
-            break;
-        }
-        if (m_ch341_register_address[i] == 0xFF)
-        {
-            break;
-        }
-    }
-
-    if (address == 0x18)
-    {
-        *value = static_cast<std::uint8_t>(uartreg::lcr() | (*value & 0x40u));
-    }
-    else if (address == 0x06 || address == 0x07)
-    {
-        *value = 0;
-    }
-}
-
-std::uint32_t Ch341Serial::ch341_baud_rate(std::uint8_t divider_high, std::uint8_t divider_low)
-{
-    if (divider_high == 0x87 && divider_low == 0xF3)
-    {
-        return 921600;
-    }
-    if (divider_high == 0x87 && divider_low == 0xD9)
-    {
-        return 307200;
-    }
-
-    const std::uint8_t divider = static_cast<std::uint8_t>(0u - divider_low);
-    std::uint32_t reference_clock;
-
-    switch (divider_high)
-    {
-    case 0x88:
-    case 0xC8:
-        reference_clock = 36923077u / 8u;
-        break;
-    case 0x89:
-    case 0xC9:
-        reference_clock = 36923077u / 8u / 256u;
-        break;
-    case 0x8A:
-    case 0xCA:
-        reference_clock = 32000000u / 8u;
-        break;
-    case 0x8B:
-    case 0xCB:
-        reference_clock = 32000000u / 8u / 256u;
-        break;
-    default:
-        switch (divider_high & 0x7Fu)
-        {
-        case 3:
-            reference_clock = 6000000;
-            break;
-        case 2:
-            reference_clock = 750000;
-            break;
-        case 1:
-            reference_clock = 93750;
-            break;
-        case 0:
-            reference_clock = 11719;
-            break;
-        default:
-            return 115200;
-        }
-        break;
-    }
-
-    if (divider == 0)
-    {
-        return 115200;
-    }
-    return reference_clock / divider;
 }
 
 } // namespace ch572::usb
@@ -711,7 +674,7 @@ extern "C" {
 
 CH572_INTERRUPT CH572_HIGH_CODE void USB_IRQHandler(void)
 {
-    ch572::usb::Ch341Serial::instance().irq_handler();
+    ch572::usb::UsbDevice::instance().irq_handler();
 }
 
 }

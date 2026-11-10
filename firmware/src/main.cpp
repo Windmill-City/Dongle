@@ -8,7 +8,7 @@
 #include "ch572/platform/registers.hpp"
 #include "ch572/platform/systick.hpp"
 #include "ch572/radio/rf_uart.hpp"
-#include "ch572/usb/ch341.hpp"
+#include "ch572/usb/usb_device.hpp"
 
 namespace {
 
@@ -33,14 +33,10 @@ int main()
     clock::init_100mhz();
     systick::start(100000u);
 
-    sysreg::iwdg_start_5s();
+    sysreg::iwdg_start(5000u);
 
-    auto &usb = usb::Ch341Serial::instance();
+    auto &usb = usb::UsbDevice::instance();
     usb.init();
-
-    while (!usb.enumerated())
-        usb.poll();
-    sysreg::iwdg_feed();
 
     rf_uart::RfUart rf(usb);
     usb.set_source(&rf);

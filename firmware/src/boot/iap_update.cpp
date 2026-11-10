@@ -77,7 +77,7 @@ std::uint32_t crc32(const std::uint8_t *data, std::uint32_t length) noexcept
     return ~crc;
 }
 
-[[noreturn]] void finish(usb::Ch341Serial &usb) noexcept
+[[noreturn]] void finish(usb::UsbDevice &usb) noexcept
 {
     // Give the host a moment to read the final status byte before the reset
     // disconnects the USB device. The application is valid at this point (the
@@ -108,7 +108,7 @@ bool in_data_range(const Session &session, std::uint32_t address,
            length <= session.erase_end - address;
 }
 
-void handle_command(usb::Ch341Serial &usb, ResponseSource &out, std::uint8_t command,
+void handle_command(usb::UsbDevice &usb, ResponseSource &out, std::uint8_t command,
                     const std::uint8_t *payload, std::uint16_t length,
                     Session &session) noexcept
 {
@@ -214,7 +214,7 @@ struct Receiver
     std::uint32_t discard_remaining = 0;
     std::uint8_t payload[kMaxPayload]{};
 
-    void feed(usb::Ch341Serial &usb, ResponseSource &out, std::uint8_t value,
+    void feed(usb::UsbDevice &usb, ResponseSource &out, std::uint8_t value,
               Session &session) noexcept
     {
         switch (state)
@@ -288,7 +288,7 @@ struct Receiver
 
 } // namespace
 
-void update_region(usb::Ch341Serial &usb, std::uint32_t start, std::uint32_t end) noexcept
+void update_region(usb::UsbDevice &usb, std::uint32_t start, std::uint32_t end) noexcept
 {
     static ResponseSource source;
     usb.set_source(&source);

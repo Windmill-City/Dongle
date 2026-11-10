@@ -3,11 +3,11 @@
 
 Both targets use the same path:
 
-    1. the host sends vendor request 0xB1 on EP0
-       (wValue 0x5A01 = application, 0x5A02 = boot region, wIndex 0x4941)
+    1. the host sends HID feature report 1
+       (command 0x01 = application, 0x02 = boot region)
     2. the application either resets into the bootloader (app upgrade) or
        serves the update in place (boot upgrade)
-    3. the host opens the serial port and waits for the ready byte 0x5A
+    3. the host opens the CDC ACM serial port and waits for the ready byte 0x5A
     4. the host streams A5 | CMD | LEN_LO LEN_HI | PAYLOAD | XOR frames
     5. the device verifies the CRC and resets
 

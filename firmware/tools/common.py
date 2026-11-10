@@ -4,52 +4,65 @@
 import zlib
 
 VID = 0x1A86
-PID = 0x7523
+PID = 0x5720
 
-REQUEST = 0xB1
-MARKER = 0x5A
-TOKEN = 0x4941
+HID_USAGE_PAGE = 0xFF00
+HID_REPORT_ID = 1
+HID_STATUS_REPORT_ID = 2
+HID_MARKER = 0x5A
+HID_TOKEN = b"IAP"
+HID_STATUS_OK = 0x00
+
 CMD_APP_UPDATE = 0x01
 CMD_BOOT_UPDATE = 0x02
 
 
-def request(command, timeout_ms=1000):
-    """Send the vendor control request that enters an upgrade mode."""
+def request(command, timeout_ms=500):
+    """Ask the running firmware for an upgrade through HID feature report 1."""
     try:
-        import usb.core
+        import hid
     except ImportError:
-        raise SystemExit("pyusb is required: pip install pyusb")
+        raise SystemExit("hidapi is required: pip install hidapi")
 
-    try:
-        device = usb.core.find(idVendor=VID, idProduct=PID)
-    except usb.core.NoBackendError:
+    devices = hid.enumerate(VID, PID)
+    if not devices:
         raise SystemExit(
-            "pyusb has no libusb backend; install libusb-1.0 (and UsbDk on "
-            "Windows if the CH341 driver owns the device)")
-    if device is None:
-        raise SystemExit(
-            "upgrade device not found (VID:PID 1A86:7523). Is the "
+            "upgrade device not found (VID:PID 1A86:5720). Is the "
             "application running and enumerated?")
 
-    try:
-        device.ctrl_transfer(
-            0x40,
-            REQUEST,
-            (MARKER << 8) | (command & 0xFF),
-            TOKEN,
-            0,
-            timeout=timeout_ms,
-        )
-    except usb.core.USBError as error:
-        raise SystemExit(
-            f"vendor control request failed: {error}\n"
-            "On Windows the CH341 driver must permit user-mode control "
-            "transfers (UsbDk, or WinUSB/libusbK via Zadig).")
-    return True
+    candidates = [info for info in devices
+                  if info.get("usage_page") == HID_USAGE_PAGE] or devices
+    report = bytes([HID_REPORT_ID, command & 0xFF, HID_MARKER]) + HID_TOKEN
+    report += bytes(8 - len(HID_TOKEN) - 2)
+
+    last_error = None
+    for info in candidates:
+        device = hid.device()
+        try:
+            device.open_path(info["path"])
+            if device.send_feature_report(report) < 0:
+                raise OSError("HID feature report was not accepted")
+            try:
+                response = device.read(9, timeout_ms)
+            except (OSError, IOError):
+                response = []
+            if response:
+                status = response[1] if response[0] in (
+                    HID_REPORT_ID, HID_STATUS_REPORT_ID) else response[0]
+                if status != HID_STATUS_OK:
+                    raise SystemExit(
+                        f"upgrade request rejected with HID status 0x{status:02X}")
+            return True
+        except (OSError, IOError) as error:
+            last_error = error
+        finally:
+            device.close()
+
+    raise SystemExit(f"HID upgrade request failed: {last_error}")
 
 
 def find_port():
-    """Return the first CH341 serial port, or None."""
+    """Return the first CDC ACM port exposed by the dongle, or None."""
     try:
         from serial.tools import list_ports
     except ImportError:
@@ -57,9 +70,6 @@ def find_port():
 
     for port in list_ports.comports():
         if (port.vid, port.pid) == (VID, PID):
-            return port.device
-        hwid = (port.hwid or "").upper()
-        if f"{VID:04X}:{PID:04X}" in hwid:
             return port.device
     return None
 

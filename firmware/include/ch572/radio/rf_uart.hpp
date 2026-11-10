@@ -5,7 +5,7 @@
 
 #include "ch572/config.hpp"
 #include "ch572/radio/rfip.hpp"
-#include "ch572/usb/ch341.hpp"
+#include "ch572/usb/usb_device.hpp"
 #include "ch572/util/ring_buffer.hpp"
 
 namespace ch572::rf_uart {
@@ -113,7 +113,7 @@ enum class RadioState : std::uint8_t
 class RfUart final : public usb::ByteSource
 {
 public:
-    explicit RfUart(usb::Ch341Serial &usb) noexcept : m_usb(usb) {}
+    explicit RfUart(usb::UsbDevice &usb) noexcept : m_usb(usb) {}
 
     void init() noexcept;
     std::size_t read(std::uint8_t *dst, std::size_t max_length) noexcept override;
@@ -132,7 +132,7 @@ private:
     CH572_HIGH_CODE void start_rx() noexcept;
     void configure_link(std::uint32_t access_address, std::uint32_t frequency) noexcept;
 
-    usb::Ch341Serial &m_usb;
+    usb::UsbDevice &m_usb;
     RingBuffer<kRfBufferSize> m_rf_buffer;
     TxBuffer m_tx_buffer{};
     alignas(4) std::uint8_t m_rx_buffer[kRxBufferSize]{};

@@ -4,7 +4,7 @@
 #include "ch572/platform/clock.hpp"
 #include "ch572/platform/registers.hpp"
 #include "ch572/platform/systick.hpp"
-#include "ch572/usb/ch341.hpp"
+#include "ch572/usb/usb_device.hpp"
 
 namespace {
 
@@ -51,13 +51,13 @@ int main()
     systick::start(100000u); // 100 MHz
     sysreg::pin_alternate() &= ~sysreg::kPinDebugEnable;
 
-    auto &usb = usb::Ch341Serial::instance();
+    auto &usb = usb::UsbDevice::instance();
     usb.init();
     while (!usb.enumerated())
     {
         usb.poll();
     }
 
-    sysreg::iwdg_start_5s();
+    sysreg::iwdg_start(5000u);
     iap::update_region(usb, kAppStart, kAppEnd);
 }

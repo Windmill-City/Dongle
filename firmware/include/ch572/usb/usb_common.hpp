@@ -40,6 +40,8 @@ inline constexpr std::uint8_t kDescriptorDevice = 1;
 inline constexpr std::uint8_t kDescriptorConfig = 2;
 inline constexpr std::uint8_t kDescriptorString = 3;
 inline constexpr std::uint8_t kDescriptorQualifier = 6;
+inline constexpr std::uint8_t kDescriptorHid = 0x21;
+inline constexpr std::uint8_t kDescriptorHidReport = 0x22;
 
 // Descriptor tables differ between the application and the bootloader, but the
 // lookup logic is the same.
