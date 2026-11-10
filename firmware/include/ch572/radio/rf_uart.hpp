@@ -33,8 +33,8 @@ inline constexpr std::uint8_t kPacketResponse = 1;
 
 struct CH572_PACKED Packet
 {
-    std::uint8_t type : 3;
-    std::uint8_t sequence : 5;
+    std::uint8_t type : 4;
+    std::uint8_t sequence : 4;
     std::uint8_t length;
 };
 
