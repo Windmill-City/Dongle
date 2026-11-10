@@ -420,7 +420,7 @@ inline constexpr std::size_t RxAccessAddressEx = 0x64;
 
 namespace rfend
 {
-inline constexpr std::size_t Control       = 0x04;
+inline constexpr std::size_t Control1      = 0x04;
 inline constexpr std::size_t Control2      = 0x08;
 inline constexpr std::size_t Control3      = 0x0C;
 inline constexpr std::size_t PhyConfig     = 0x34;

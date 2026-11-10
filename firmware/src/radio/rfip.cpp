@@ -214,12 +214,12 @@ void start_tx(Frame* frame) noexcept
 
     if (Lle::r16(lle::WaitTime) > 40u)
     {
-        RfEnd::r32(rfend_reg::Control) &= ~0x100u;
+        RfEnd::r32(rfend_reg::Control1) &= ~0x100u;
         nop();
         nop();
         nop();
         nop();
-        RfEnd::r32(rfend_reg::Control) |= 0x100u;
+        RfEnd::r32(rfend_reg::Control1) |= 0x100u;
     }
 
     Bb::r32(bb::AccessAddress)   = kLinkAccessAddress;

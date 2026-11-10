@@ -15,7 +15,10 @@ namespace lle                               = radio_reg::lle;
 // Measured calibration value for the fixed 2440 MHz channel.
 std::uint8_t            g_nco2440           = 0;
 
-constexpr std::uint32_t kCalibrationTimeout = 10000000u;
+// The LLE countdown timer runs at 2 MHz on CH570/CH572.
+constexpr std::uint32_t kTimerTicksPerUs    = 2;
+constexpr std::uint32_t kFilterTimeoutTicks = 100000u * kTimerTicksPerUs;
+constexpr std::uint32_t kTuneTimeoutTicks   = 4000u * kTimerTicksPerUs;
 
 } // namespace
 
@@ -34,10 +37,6 @@ void dev_init() noexcept
     RfEnd::r32(off::RxControl) |= 0x00070000u;
     RfEnd::r32(off::RxControl) |= 0x07000000u;
     RfEnd::r32(off::TxBias) |= 0x00000800u;
-    for (int i = 0; i < 100; ++i)
-    {
-        nop();
-    }
 }
 
 namespace
@@ -54,19 +53,11 @@ void rx_filter() noexcept
     nop();
     nop();
     RfEnd::r32(off::Control3) |= 0x10u;
-    RfEnd::r32(off::Control) |= 0x00010000u;
+    RfEnd::r32(off::Control1) |= 0x00010000u;
 
-    Lle::r32(lle::Timer) = 100;
-    for (volatile std::uint32_t i = 0; i < 1000000u; ++i)
+    Lle::r32(lle::Timer) = kFilterTimeoutTicks;
+    while ((RfEnd::r32(off::FilterResult) & 0x100u) == 0 && Lle::r32(lle::Timer) != 0)
     {
-        nop();
-    }
-    for (std::uint32_t i = 0; i < kCalibrationTimeout; ++i)
-    {
-        if ((RfEnd::r32(off::FilterResult) & 0x100u) != 0)
-        {
-            break;
-        }
     }
 
     nop();
@@ -90,25 +81,21 @@ void rx_adc() noexcept
     RfEnd::r32(off::AdcControl) &= 0xFFFEFFFFu;
     RfEnd::r32(off::Control2) |= 0x00010000u;
     RfEnd::r32(off::Control3) &= ~0x100u;
-    RfEnd::r32(off::Control) &= 0xFFFEFFFFu;
+    RfEnd::r32(off::Control1) &= 0xFFFEFFFFu;
     RfEnd::r32(off::Control3) |= 0x100u;
-    RfEnd::r32(off::Control) |= 0x00010000u;
+    RfEnd::r32(off::Control1) |= 0x00010000u;
 }
 
 void wait_tune(std::uint16_t cycles) noexcept
 {
-    RfEnd::r32(off::Control) &= ~1u;
+    RfEnd::r32(off::Control1) &= ~1u;
     RfEnd::r32(off::DacRef) =
         (RfEnd::r32(off::DacRef) & 0xFFFE00FFu) | (static_cast<std::uint32_t>(cycles & 0x1FFu) << 8);
-    RfEnd::r32(off::Control) |= 1u;
-    Lle::r32(lle::Timer) = 0x1F40u;
+    RfEnd::r32(off::Control1) |= 1u;
+    Lle::r32(lle::Timer) = kTuneTimeoutTicks;
 
-    for (std::uint32_t i = 0; i < kCalibrationTimeout; ++i)
+    while (Lle::r32(lle::Timer) != 0)
     {
-        if (Lle::r32(lle::Timer) == 0)
-        {
-            break;
-        }
         const std::uint32_t value = RfEnd::r32(off::TuneResult);
         if ((value & 0x06000000u) == 0x06000000u)
         {
@@ -119,22 +106,22 @@ void wait_tune(std::uint16_t cycles) noexcept
 
 void tx_ftune() noexcept
 {
-    RfEnd::r32(off::Control) |= 0x100u;
+    RfEnd::r32(off::Control1) |= 0x100u;
 }
 
 void tx_ctune() noexcept
 {
-    RfEnd::r32(off::Control) &= ~0x100u;
+    RfEnd::r32(off::Control1) &= ~0x100u;
     RfEnd::r32(off::TxBias) &= ~0x1000u;
     RfEnd::r32(off::TxControl) &= ~0x10u;
     RfEnd::r32(off::Control2) |= 0x00020000u;
-    RfEnd::r32(off::Control) |= 0x10u;
+    RfEnd::r32(off::Control1) |= 0x10u;
 
     wait_tune(211);
     g_nco2440 = static_cast<std::uint8_t>(RfEnd::r32(off::TuneResult) & 0x3Fu);
 
-    RfEnd::r32(off::Control) &= ~0x10u;
-    RfEnd::r32(off::Control) &= ~1u;
+    RfEnd::r32(off::Control1) &= ~0x10u;
+    RfEnd::r32(off::Control1) &= ~1u;
     RfEnd::r32(off::TxBias) |= 0x1000u;
     RfEnd::r32(off::TxControl) |= 0x10u;
     RfEnd::r32(off::DacRef) = (RfEnd::r32(off::DacRef) & ~0x3Fu) | (g_nco2440 & 0x3Fu);
