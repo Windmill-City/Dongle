@@ -219,9 +219,6 @@ inline void disable_watchdog_reset() noexcept
     reset_watchdog_ctrl() &= ~0x06u;
 }
 
-// Trigger a software reset. Defined in fault.cpp in .highcode.
-[[noreturn]] void software_reset() noexcept;
-
 } // namespace sysreg
 
 // ---------------------------------------------------------------------------
