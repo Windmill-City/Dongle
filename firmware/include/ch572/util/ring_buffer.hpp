@@ -3,9 +3,6 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "ch572/compiler.hpp"
-#include "ch572/platform/registers.hpp"
-
 namespace ch572
 {
 
@@ -19,21 +16,34 @@ inline void wch_mcpy(void* dst, const void* src, std::size_t length) noexcept
     asm volatile("mcpy %2, %0, %1" : "+r"(s), "+r"(d) : "r"(end) : "memory");
 }
 
+// Lock-free for one producer and one consumer only: each index is written by
+// exactly one side, the payload is copied before the index is published, and
+// the block copy's memory clobber keeps those stores ordered.  Calling write()
+// from two contexts, or read() from two contexts, still needs external
+// serialization.
 template <std::size_t N>
 class RingBuffer
 {
   public:
     static_assert(N > 0, "RingBuffer must have storage");
 
+    // N bytes of payload plus one permanently unused slot that separates the
+    // full and empty states, so no separate count is needed.
+    static constexpr std::size_t capacity = N;
+
     std::size_t size() const noexcept
     {
-        CriticalSection guard;
-        return m_count;
+        return used();
     }
 
     bool empty() const noexcept
     {
-        return size() == 0;
+        return m_read == m_write;
+    }
+
+    bool full() const noexcept
+    {
+        return next(m_write) == m_read;
     }
 
     std::size_t write(const void* src, std::size_t length) noexcept
@@ -43,49 +53,44 @@ class RingBuffer
             return 0;
         }
 
+        if (length > capacity - used())
         {
-            CriticalSection guard;
-            if (length > (N - m_count))
-            {
-                return 0;
-            }
+            return 0;
         }
 
-        const std::size_t first = N - m_write;
+        std::size_t head = m_write;
+
+        const std::size_t first = kSlots - head;
         if (length <= first)
         {
-            wch_mcpy(&m_pool[m_write], src, length);
-            m_write += length;
-            if (m_write == N)
+            wch_mcpy(&m_pool[head], src, length);
+            head += length;
+            if (head == kSlots)
             {
-                m_write = 0;
+                head = 0;
             }
         }
         else
         {
-            wch_mcpy(&m_pool[m_write], src, first);
+            wch_mcpy(&m_pool[head], src, first);
             wch_mcpy(&m_pool[0], static_cast<const std::uint8_t*>(src) + first, length - first);
-            m_write = length - first;
+            head = length - first;
         }
 
-        CriticalSection guard;
-        m_count += length;
+        m_write = head;
         return length;
     }
 
     std::size_t read(void* dst, std::size_t length) noexcept
     {
-        if (dst == nullptr)
+        if (dst == nullptr || length == 0)
         {
             return 0;
         }
 
-        std::size_t available;
-        {
-            CriticalSection guard;
-            available = m_count;
-        }
-        if (available == 0 || length == 0)
+        std::size_t       tail      = m_read;
+        const std::size_t available = used();
+        if (available == 0)
         {
             return 0;
         }
@@ -94,33 +99,45 @@ class RingBuffer
             length = available;
         }
 
-        const std::size_t first = N - m_read;
+        const std::size_t first = kSlots - tail;
         if (length <= first)
         {
-            wch_mcpy(dst, &m_pool[m_read], length);
-            m_read += length;
-            if (m_read == N)
+            wch_mcpy(dst, &m_pool[tail], length);
+            tail += length;
+            if (tail == kSlots)
             {
-                m_read = 0;
+                tail = 0;
             }
         }
         else
         {
-            wch_mcpy(dst, &m_pool[m_read], first);
+            wch_mcpy(dst, &m_pool[tail], first);
             wch_mcpy(static_cast<std::uint8_t*>(dst) + first, &m_pool[0], length - first);
-            m_read = length - first;
+            tail = length - first;
         }
 
-        CriticalSection guard;
-        m_count -= length;
+        m_read = tail;
         return length;
     }
 
   private:
-    std::uint8_t         m_pool[N]{};
-    std::size_t          m_write = 0;
-    std::size_t          m_read  = 0;
-    volatile std::size_t m_count = 0;
+    static constexpr std::size_t kSlots = N + 1;
+
+    static constexpr std::size_t next(std::size_t index) noexcept
+    {
+        return index + 1 == kSlots ? 0 : index + 1;
+    }
+
+    std::size_t used() const noexcept
+    {
+        const std::size_t head = m_write;
+        const std::size_t tail = m_read;
+        return head >= tail ? head - tail : (kSlots - tail) + head;
+    }
+
+    std::uint8_t         m_pool[kSlots]{};
+    volatile std::size_t m_write = 0;
+    volatile std::size_t m_read  = 0;
 };
 
 } // namespace ch572
