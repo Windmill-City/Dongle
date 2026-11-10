@@ -58,7 +58,7 @@ inline constexpr std::uint32_t kRxByteTicks        = 8u;
 inline constexpr std::uint32_t kRxFixedTicks       = 60u;
 
 CH572_HIGH_CODE void           rf_basic_process(std::uint32_t raw_irq) noexcept;
-void                           wakeup_reg_init() noexcept;
+void                           wakeup() noexcept;
 void                           calibration() noexcept;
 CH572_HIGH_CODE std::uint8_t read_crc() noexcept;
 
@@ -149,7 +149,7 @@ CH572_HIGH_CODE void rf_basic_process(std::uint32_t raw_irq) noexcept
 
 } // namespace
 
-void role_init(ProcessCallback process_cb) noexcept
+void init(ProcessCallback process_cb) noexcept
 {
     if (process_cb == nullptr)
     {
@@ -160,7 +160,7 @@ void role_init(ProcessCallback process_cb) noexcept
 
     rfend_block::dev_init();
 
-    wakeup_reg_init();
+    wakeup();
 
     calibration();
 
@@ -171,7 +171,7 @@ void role_init(ProcessCallback process_cb) noexcept
 namespace
 {
 
-void wakeup_reg_init() noexcept
+void wakeup() noexcept
 {
     {
         sysreg::SafeAccess access;

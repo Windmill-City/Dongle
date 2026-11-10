@@ -13,7 +13,7 @@ void RfUart::init() noexcept
 {
     g_instance = this;
 
-    rf::role_init(&RfUart::on_status);
+    rf::init(&RfUart::on_status);
 
     start_rx();
 }

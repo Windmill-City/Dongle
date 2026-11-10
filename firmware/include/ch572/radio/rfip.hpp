@@ -67,7 +67,7 @@ struct alignas(4) Frame
 static_assert(offsetof(Frame, payload) == sizeof(Packet), "RF payload is contiguous");
 static_assert(sizeof(Frame) == 68, "RF frame is header plus payload");
 
-void                 role_init(ProcessCallback process_cb) noexcept;
+void                 init(ProcessCallback process_cb) noexcept;
 CH572_HIGH_CODE void start_tx(Frame* frame) noexcept;
 CH572_HIGH_CODE void set_rx(Frame* frame, std::uint32_t timeout) noexcept;
 
