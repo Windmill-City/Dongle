@@ -1,6 +1,5 @@
 #include "ch572/radio/rfend.hpp"
 
-#include "ch572/compiler.hpp"
 #include "ch572/platform/registers.hpp"
 
 namespace ch572::rfend

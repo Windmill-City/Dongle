@@ -5,6 +5,7 @@
 #include "ch572/compiler.hpp"
 #include "ch572/platform/registers.hpp"
 #include "ch572/radio/rf_uart.hpp"
+#include "ch572/usb/descriptors.hpp"
 #include "ch572/usb/usb_common.hpp"
 
 namespace ch572::usb

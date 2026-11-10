@@ -5,7 +5,6 @@
 
 #include "ch572/compiler.hpp"
 #include "ch572/platform/registers.hpp"
-#include "ch572/usb/descriptors.hpp"
 #include "ch572/util/ring_buffer.hpp"
 
 namespace ch572::rf_uart
