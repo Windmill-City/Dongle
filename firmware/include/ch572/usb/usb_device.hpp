@@ -19,8 +19,7 @@ protected:
     ~ByteSource() = default;
 };
 
-// USB composite device: CDC ACM for the transparent serial stream and a
-// vendor-defined HID feature report that selects an upgrade target.
+// USB CDC ACM device exposing the transparent serial stream.
 class UsbDevice
 {
 public:
@@ -33,8 +32,6 @@ public:
 
     CH572_HIGH_CODE std::size_t read_host(void *dst, std::size_t max_length);
     bool enumerated() const noexcept { return (usbreg::dev_addr() & 0x7Fu) != 0; }
-    bool app_update_requested() const noexcept { return m_app_update_request; }
-    bool iap_update_requested() const noexcept { return m_iap_update_request; }
 
 private:
     UsbDevice() = default;
@@ -53,9 +50,6 @@ private:
     void endpoint_init();
     CH572_HIGH_CODE void handle_setup();
     void handle_ep0_in();
-#ifndef IAP_BOOT
-    CH572_HIGH_CODE void handle_hid_report(std::uint8_t length);
-#endif
 
     DeviceInfo m_device_info;
     std::uint8_t m_setup_request = 0;
@@ -69,8 +63,6 @@ private:
 
     RingBuffer<kUsbBufferSize> m_rx_buffer;
     ByteSource *m_source = nullptr;
-    volatile bool m_app_update_request = false;
-    volatile bool m_iap_update_request = false;
 };
 
 } // namespace ch572::usb

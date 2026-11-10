@@ -189,9 +189,8 @@ WDOG_BAT_IRQHandler:
     bltu s0, s1, .Linit_loop
 .Linit_done:
 
-    /* MPP=machine (0x1800) so a bootloader jump into the application does
-       not leave it in user mode; user mode cannot write machine CSRs and the
-       application's startup would trap. */
+    /* MPP=machine (0x1800): main() runs in machine mode, which is required
+       for the machine CSR writes in the platform layer. */
     li t0, 0x1880
     csrw mstatus, t0
 

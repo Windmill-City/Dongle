@@ -1,6 +1,5 @@
 #include <cstdint>
 
-#include "ch572/boot/iap_flag.hpp"
 #include "ch572/platform/clock.hpp"
 #include "ch572/platform/registers.hpp"
 #include "ch572/platform/systick.hpp"
@@ -40,29 +39,12 @@ int main()
     usb.set_source(&rf);
     rf.init();
 
-    iap::app_ok();
-
     std::uint32_t last_blink = systick::now();
 
     for (;;)
     {
         usb.poll();
         sysreg::iwdg_feed();
-
-        if (usb.app_update_requested())
-        {
-            // App upgrade: reset into the bootloader, which serves the same
-            // framed serial protocol for the application region.
-            iap::jump();
-        }
-
-        if (usb.iap_update_requested())
-        {
-            // Hand the boot region update to the bootloader: it stages the
-            // image and copies it to 0x0000 from RAM.
-            iap::request_update();
-            sysreg::software_reset();
-        }
 
         const std::uint32_t now = systick::now();
         if (usb.enumerated())

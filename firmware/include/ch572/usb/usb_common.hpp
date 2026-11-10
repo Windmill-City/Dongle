@@ -27,7 +27,7 @@ inline constexpr std::uint8_t kRecipientMask = 0x1F;
 inline constexpr std::uint8_t kRecipientDevice = 0x00;
 inline constexpr std::uint8_t kRecipientEndpoint = 0x02;
 
-// Standard requests shared by the application and the bootloader.
+// Standard requests.
 inline constexpr std::uint8_t kReqGetStatus = 0x00;
 inline constexpr std::uint8_t kReqClearFeature = 0x01;
 inline constexpr std::uint8_t kReqSetAddress = 0x05;
@@ -38,11 +38,7 @@ inline constexpr std::uint8_t kReqGetInterface = 0x0A;
 
 inline constexpr std::uint8_t kDescriptorDevice = 1;
 inline constexpr std::uint8_t kDescriptorConfig = 2;
-inline constexpr std::uint8_t kDescriptorHid = 0x21;
-inline constexpr std::uint8_t kDescriptorHidReport = 0x22;
 
-// Descriptor tables differ between the application and the bootloader, but the
-// lookup logic is the same.
 struct DescriptorSet
 {
     const std::uint8_t *device;

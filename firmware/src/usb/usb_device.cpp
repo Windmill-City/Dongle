@@ -15,22 +15,6 @@ constexpr std::uint8_t kCdcGetLineCoding = 0x21;
 constexpr std::uint8_t kCdcSetControlLineState = 0x22;
 constexpr std::uint8_t kCdcSendBreak = 0x23;
 
-#ifndef IAP_BOOT
-// HID class requests.
-constexpr std::uint8_t kHidSetReport = 0x09;
-constexpr std::uint8_t kHidSetIdle = 0x0A;
-constexpr std::uint8_t kHidSetProtocol = 0x0B;
-
-// Feature report ID 1: command, marker, "IAP", padding. The marker keeps a
-// stray report from a generic HID tool from arming an upgrade.
-constexpr std::uint8_t kHidMarker = 0x5A;
-constexpr std::uint8_t kHidTokenI = 'I';
-constexpr std::uint8_t kHidTokenA = 'A';
-constexpr std::uint8_t kHidTokenP = 'P';
-constexpr std::uint8_t kIapCommandAppUpdate = 0x01;
-constexpr std::uint8_t kIapCommandBootUpdate = 0x02;
-#endif
-
 constexpr std::uint8_t kStall = 0xFF;
 constexpr std::uint8_t kTokenOut = 0x00;
 constexpr std::uint8_t kTokenIn = 0x20;
@@ -56,8 +40,6 @@ UsbDevice &UsbDevice::instance()
 void UsbDevice::init()
 {
     sysreg::pin_alternate() &= ~sysreg::kPinDebugEnable;
-    m_app_update_request = false;
-    m_iap_update_request = false;
     endpoint_init();
 
     // WCH implements the global interrupt enable in the custom CSR 0x800
@@ -73,7 +55,6 @@ void UsbDevice::endpoint_init()
     usbreg::ctrl() = 0;
 
     // EP1 is the CDC ACM notification endpoint and EP2 is the CDC data pair.
-    // There is no HID interrupt endpoint: SET_REPORT arrives on EP0.
     usbreg::ep4_1_mod() = usbreg::kUep1TxEn;
     usbreg::ep2_3_mod() = usbreg::kUep2RxEn | usbreg::kUep2TxEn;
 
@@ -130,28 +111,11 @@ void UsbDevice::handle_setup()
         case kReqGetDescriptor:
         {
             const std::uint8_t type = setup->value_h;
-            const std::uint8_t *descriptor = nullptr;
+            const std::uint8_t *descriptor = find_descriptor(kDescriptors, type);
             std::uint8_t descriptor_length = 0;
-
-#ifndef IAP_BOOT
-            if (type == kDescriptorHid)
+            if (descriptor != nullptr)
             {
-                descriptor = kHidDescriptor;
-                descriptor_length = sizeof(kHidDescriptor);
-            }
-            else if (type == kDescriptorHidReport)
-            {
-                descriptor = kHidReportDescriptor;
-                descriptor_length = sizeof(kHidReportDescriptor);
-            }
-            else
-#endif
-            {
-                descriptor = find_descriptor(kDescriptors, type);
-                if (descriptor != nullptr)
-                {
-                    descriptor_length = descriptor[0];
-                }
+                descriptor_length = descriptor[0];
             }
 
             if (descriptor == nullptr)
@@ -240,52 +204,32 @@ void UsbDevice::handle_setup()
     }
     else if (request_type == kRequestTypeClass)
     {
-#ifndef IAP_BOOT
-        if (setup->index_l == kHidInterface)
+        switch (m_setup_request)
         {
-            switch (m_setup_request)
+        case kCdcSetLineCoding:
+            length = data_direction == 0 ? 0 : kStall;
+            break;
+
+        case kCdcGetLineCoding:
+            if (data_direction != 0)
             {
-            case kHidSetReport:
-            case kHidSetIdle:
-            case kHidSetProtocol:
-                length = data_direction == 0 ? 0 : kStall;
-                break;
-
-            default:
-                length = kStall;
-                break;
+                length = static_cast<std::uint8_t>(kCdcLineCodingSize);
+                std::memcpy(m_ep0_buffer, kLineCoding, kCdcLineCodingSize);
             }
-        }
-        else
-#endif
-        {
-            switch (m_setup_request)
+            else
             {
-            case kCdcSetLineCoding:
-                length = data_direction == 0 ? 0 : kStall;
-                break;
-
-            case kCdcGetLineCoding:
-                if (data_direction != 0)
-                {
-                    length = static_cast<std::uint8_t>(kCdcLineCodingSize);
-                    std::memcpy(m_ep0_buffer, kLineCoding, kCdcLineCodingSize);
-                }
-                else
-                {
-                    length = kStall;
-                }
-                break;
-
-            case kCdcSetControlLineState:
-            case kCdcSendBreak:
-                length = data_direction == 0 ? 0 : kStall;
-                break;
-
-            default:
                 length = kStall;
-                break;
             }
+            break;
+
+        case kCdcSetControlLineState:
+        case kCdcSendBreak:
+            length = data_direction == 0 ? 0 : kStall;
+            break;
+
+        default:
+            length = kStall;
+            break;
         }
     }
     else
@@ -309,37 +253,6 @@ void UsbDevice::handle_setup()
     usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
                          rx_response | usbreg::kUepTResAck;
 }
-
-#ifndef IAP_BOOT
-void UsbDevice::handle_hid_report(std::uint8_t length)
-{
-    if (length < 6 || m_ep0_buffer[0] != kHidReportId)
-    {
-        return;
-    }
-
-    const std::uint8_t command = m_ep0_buffer[1];
-    const bool valid =
-        m_ep0_buffer[2] == kHidMarker &&
-        m_ep0_buffer[3] == kHidTokenI &&
-        m_ep0_buffer[4] == kHidTokenA &&
-        m_ep0_buffer[5] == kHidTokenP;
-
-    if (!valid)
-    {
-        return;
-    }
-
-    if (command == kIapCommandAppUpdate)
-    {
-        m_app_update_request = true;
-    }
-    else if (command == kIapCommandBootUpdate)
-    {
-        m_iap_update_request = true;
-    }
-}
-#endif
 
 void UsbDevice::irq_handler()
 {
@@ -379,22 +292,8 @@ void UsbDevice::irq_handler()
             case kTokenOut | 0:
                 if (toggle_ok)
                 {
-                    if (length != 0 && m_setup_type == kRequestTypeClass)
-                    {
-#ifndef IAP_BOOT
-                        if (m_setup_request == kHidSetReport)
-                        {
-                            handle_hid_report(length);
-                        }
-#endif
-                        usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
-                                             usbreg::kUepRResNak | usbreg::kUepTResAck;
-                    }
-                    else
-                    {
-                        usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
-                                             usbreg::kUepRResNak | usbreg::kUepTResNak;
-                    }
+                    usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog |
+                                         usbreg::kUepRResNak | usbreg::kUepTResAck;
                 }
                 break;
 
