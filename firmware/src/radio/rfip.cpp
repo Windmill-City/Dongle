@@ -16,7 +16,7 @@ using radio_reg::RfEnd;
 namespace lle                                      = radio_reg::lle;
 namespace bb                                       = radio_reg::bb;
 namespace rfend_reg                                = radio_reg::rfend;
-namespace rfend_block                              = ch572::rfend;
+namespace rfend                                    = ch572::rfend;
 
 ProcessCallback                g_process_cb        = nullptr;
 std::uint32_t                  g_wait_recv_time    = 0;
@@ -103,7 +103,7 @@ CH572_HIGH_CODE void set_phy_rx_mode(std::uint8_t rx_max_len) noexcept
 {
     Bb::r32(bb::Control) &= ~bb::kControlPhyMask;
     RfEnd::r32(rfend_reg::FilterControl) = (RfEnd::r32(rfend_reg::FilterControl) & ~rfend_reg::kFilterTuneMask)
-                                         | (rfend_block::tune_filter_2m() & rfend_reg::kFilterTuneMask);
+                                         | (rfend::tune_filter_2m() & rfend_reg::kFilterTuneMask);
     Bb::r32(bb::Control3) &= ~bb::kControl3PhyMask;
     Bb::r32(bb::Control1)    = (Bb::r32(bb::Control1) & ~bb::kRxControl1Mask) | kBbRxControl1Value;
     Bb::r8(bb::Control2High) = kBbRxControl2High;
@@ -158,7 +158,7 @@ void init(ProcessCallback process_cb) noexcept
 
     g_process_cb = process_cb;
 
-    rfend_block::init();
+    rfend::init();
 
     wakeup();
 
@@ -192,7 +192,7 @@ void calibration() noexcept
     RfEnd::r32(rfend_reg::Control2) |= rfend_reg::kControl2Calibration;
     Lle::r32(lle::PhyControl) = kLlePhyCalibration;
 
-    rfend_block::calibration();
+    rfend::calibration();
 
     Lle::r32(lle::Irq)   = lle::kIrqTimer0;
     Bb::r32(bb::Control) = (Bb::r32(bb::Control) & ~bb::kControlModeMask) | bb::kControlIdleMode;
@@ -219,10 +219,10 @@ void start_tx(Frame* frame) noexcept
 
     const std::uint8_t tx_power = static_cast<std::uint8_t>(kLinkTxPower | kBbTxPowerBoost);
     Bb::r32(bb::TxPower)        = (Bb::r32(bb::TxPower) & ~bb::kTxPowerLevelMask)
-                         | (static_cast<std::uint32_t>(tx_power) << bb::kTxPowerLevelShift);
-    Lle::r16(lle::WaitTime) = kLinkWaitTime;
-    Bb::r32(bb::TxPower)    = (Bb::r32(bb::TxPower) & ~bb::kTxPowerModeMask) | kBbTxPowerStartMode;
-    Bb::r32(bb::Control)    = (Bb::r32(bb::Control) & ~bb::kControlModeMask) | bb::kControlCalibrationMode;
+                                | (static_cast<std::uint32_t>(tx_power) << bb::kTxPowerLevelShift);
+    Lle::r16(lle::WaitTime)     = kLinkWaitTime;
+    Bb::r32(bb::TxPower)        = (Bb::r32(bb::TxPower) & ~bb::kTxPowerModeMask) | kBbTxPowerStartMode;
+    Bb::r32(bb::Control)        = (Bb::r32(bb::Control) & ~bb::kControlModeMask) | bb::kControlCalibrationMode;
     RfEnd::r32(rfend_reg::Control2) |= rfend_reg::kControl2Calibration;
     Lle::r32(lle::PhyControl) = kLlePhyTx;
 
