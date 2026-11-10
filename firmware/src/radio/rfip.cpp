@@ -15,7 +15,7 @@ using radio_reg::Lle;
 using radio_reg::RfEnd;
 namespace lle                                      = radio_reg::lle;
 namespace bb                                       = radio_reg::bb;
-namespace rfend_reg                                = radio_reg::rfend;
+namespace reg                                = radio_reg::rfend;
 namespace rfend                                    = ch572::rfend;
 
 ProcessCallback                g_process_cb        = nullptr;
@@ -79,14 +79,14 @@ CH572_HIGH_CODE void start_lle_timer(std::uint32_t total, std::uint32_t bit) noe
 
 CH572_HIGH_CODE void configure_channel(std::uint32_t channel) noexcept
 {
-    RfEnd::r32(rfend_reg::TxControl1) &= ~rfend_reg::kTxControl1ChannelBand;
+    RfEnd::r32(reg::TxControl1) &= ~reg::kTxControl1ChannelBand;
     Bb::r32(bb::Control) = (Bb::r32(bb::Control) & ~(bb::kControlChannelMask | bb::kControlWhiteningOff))
                          | (channel & bb::kControlChannelMask);
 }
 
 CH572_HIGH_CODE void set_phy_tx_mode(std::uint32_t tx_dma) noexcept
 {
-    RfEnd::r32(rfend_reg::PhyConfig) &= ~rfend_reg::kPhyConfigModeMask;
+    RfEnd::r32(reg::PhyConfig) &= ~reg::kPhyConfigModeMask;
 
     Bb::r32(bb::Control) &= ~bb::kControlPhyMask;
     const std::uint32_t dma_word = read_u32(reinterpret_cast<const void*>(tx_dma));
@@ -102,8 +102,8 @@ CH572_HIGH_CODE void set_phy_tx_mode(std::uint32_t tx_dma) noexcept
 CH572_HIGH_CODE void set_phy_rx_mode(std::uint8_t rx_max_len) noexcept
 {
     Bb::r32(bb::Control) &= ~bb::kControlPhyMask;
-    RfEnd::r32(rfend_reg::FilterControl) = (RfEnd::r32(rfend_reg::FilterControl) & ~rfend_reg::kFilterTuneMask)
-                                         | (rfend::tune_filter_2m() & rfend_reg::kFilterTuneMask);
+    RfEnd::r32(reg::FilterControl) = (RfEnd::r32(reg::FilterControl) & ~reg::kFilterTuneMask)
+                                         | (rfend::tune_filter_2m() & reg::kFilterTuneMask);
     Bb::r32(bb::Control3) &= ~bb::kControl3PhyMask;
     Bb::r32(bb::Control1)    = (Bb::r32(bb::Control1) & ~bb::kRxControl1Mask) | kBbRxControl1Value;
     Bb::r8(bb::Control2High) = kBbRxControl2High;
@@ -189,14 +189,14 @@ void wakeup() noexcept
 void calibration() noexcept
 {
     Bb::r32(bb::Control) = (Bb::r32(bb::Control) & ~bb::kControlModeMask) | bb::kControlCalibrationMode;
-    RfEnd::r32(rfend_reg::Control2) |= rfend_reg::kControl2Calibration;
+    RfEnd::r32(reg::Control2) |= reg::kControl2Calibration;
     Lle::r32(lle::PhyControl) = kLlePhyCalibration;
 
     rfend::calibration();
 
     Lle::r32(lle::Irq)   = lle::kIrqTimer0;
     Bb::r32(bb::Control) = (Bb::r32(bb::Control) & ~bb::kControlModeMask) | bb::kControlIdleMode;
-    RfEnd::r32(rfend_reg::Control2) &= rfend_reg::kControl2CalibrationClear;
+    RfEnd::r32(reg::Control2) &= reg::kControl2CalibrationClear;
     Lle::r32(lle::PhyControl) = kLlePhyIdle;
 }
 
@@ -223,19 +223,19 @@ void start_tx(Frame* frame) noexcept
     Lle::r16(lle::WaitTime)     = kLinkWaitTime;
     Bb::r32(bb::TxPower)        = (Bb::r32(bb::TxPower) & ~bb::kTxPowerModeMask) | kBbTxPowerStartMode;
     Bb::r32(bb::Control)        = (Bb::r32(bb::Control) & ~bb::kControlModeMask) | bb::kControlCalibrationMode;
-    RfEnd::r32(rfend_reg::Control2) |= rfend_reg::kControl2Calibration;
+    RfEnd::r32(reg::Control2) |= reg::kControl2Calibration;
     Lle::r32(lle::PhyControl) = kLlePhyTx;
 
     configure_channel(kLinkFrequency);
 
     if (Lle::r16(lle::WaitTime) > kTxFineTuneWait)
     {
-        RfEnd::r32(rfend_reg::Control1) &= ~rfend_reg::kControl1TxFine;
+        RfEnd::r32(reg::Control1) &= ~reg::kControl1TxFine;
         nop();
         nop();
         nop();
         nop();
-        RfEnd::r32(rfend_reg::Control1) |= rfend_reg::kControl1TxFine;
+        RfEnd::r32(reg::Control1) |= reg::kControl1TxFine;
     }
 
     Bb::r32(bb::AccessAddress)   = kLinkAccessAddress;
@@ -265,7 +265,7 @@ void set_rx(Frame* frame, std::uint32_t timeout) noexcept
     }
 
     Bb::r32(bb::Control) = (Bb::r32(bb::Control) & ~bb::kControlModeMask) | bb::kControlCalibrationMode;
-    RfEnd::r32(rfend_reg::Control2) |= rfend_reg::kControl2Calibration;
+    RfEnd::r32(reg::Control2) |= reg::kControl2Calibration;
     Lle::r32(lle::PhyControl) = kLlePhyRx;
 
     configure_channel(kLinkFrequency);
