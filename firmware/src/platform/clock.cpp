@@ -11,11 +11,11 @@ namespace
 // 100MHz
 constexpr std::uint8_t kSysClockSelectHse = 0xC0;
 constexpr std::uint8_t kSysClockSelectPll = 0x40;
-constexpr std::uint8_t kPll100MHz         = kSysClockSelectPll | 6;
+constexpr std::uint8_t kPll               = kSysClockSelectPll | 6;
 constexpr std::uint8_t kPowerPlanEnable   = 0x40;
 constexpr std::uint8_t kFlashPllConfig    = 0x01;
 constexpr std::uint8_t kFlashSckPll       = 1u << 4;
-constexpr std::uint8_t kHseCapacitanceP8  = 0x10;
+constexpr std::uint8_t kHseCapacitance    = 0x10; // 8pF
 
 } // namespace
 
@@ -23,7 +23,7 @@ CH572_HIGH_CODE void init() noexcept
 {
     {
         sysreg::SafeAccess access;
-        sysreg::xt32m_tune() = static_cast<std::uint8_t>((sysreg::xt32m_tune() & 0x0Fu) | kHseCapacitanceP8);
+        sysreg::xt32m_tune() = static_cast<std::uint8_t>((sysreg::xt32m_tune() & 0x0Fu) | kHseCapacitance);
     }
 
     if ((sysreg::hfck_power_ctrl() & sysreg::kClockXt32mOn) == 0)
@@ -61,7 +61,7 @@ CH572_HIGH_CODE void init() noexcept
     {
         sysreg::SafeAccess access;
         sysreg::sleep_power_ctrl() |= kPowerPlanEnable;
-        sysreg::clock_sys_cfg() = kPll100MHz;
+        sysreg::clock_sys_cfg() = kPll;
         // 7,7 trims from the CH570Q SetSysClock().
         sysreg::misc_ctrl() |= (7u << 3) | (7u << 6);
     }
