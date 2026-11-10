@@ -8,14 +8,14 @@
 namespace ch572::rf
 {
 
-using RoleEvent                                   = std::uint32_t;
-using ProcessCallback                             = void (*)(RoleEvent event);
+using Event                                   = std::uint32_t;
+using ProcessCallback                             = void (*)(Event event);
 
 // Events reported to the role callback. These are deliberately independent
 // from the raw LLE IRQ bits, which are decoded inside rfip.cpp.
-inline constexpr RoleEvent     kEventEr           = 1u << 0;
-inline constexpr RoleEvent     kEventTx           = 1u << 1;
-inline constexpr RoleEvent     kEventRx           = 1u << 2;
+inline constexpr Event     kEventEr           = 1u << 0;
+inline constexpr Event     kEventTx           = 1u << 1;
+inline constexpr Event     kEventRx           = 1u << 2;
 
 inline constexpr std::uint8_t  kTxPowerMinus25Dbm = 0x01;
 inline constexpr std::uint8_t  kTxPowerMinus20Dbm = 0x02;

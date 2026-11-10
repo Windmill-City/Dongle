@@ -111,7 +111,7 @@ CH572_HIGH_CODE void set_phy_rx_mode(std::uint8_t rx_max_len) noexcept
     g_wait_recv_time = (static_cast<std::uint32_t>(rx_max_len) + kRxLengthOverhead) * kRxByteTicks + kRxFixedTicks;
 }
 
-CH572_HIGH_CODE void notify(RoleEvent event) noexcept
+CH572_HIGH_CODE void notify(Event event) noexcept
 {
     if (g_process_cb != nullptr)
     {

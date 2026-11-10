@@ -18,7 +18,7 @@ void RfUart::init() noexcept
     start_rx();
 }
 
-void RfUart::on_status(rf::RoleEvent event) noexcept
+void RfUart::on_status(rf::Event event) noexcept
 {
     if (g_instance == nullptr)
     {

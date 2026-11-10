@@ -34,7 +34,7 @@ class RfUart final
     std::size_t read(std::uint8_t* dst, std::size_t max_length) noexcept;
 
   private:
-    CH572_HIGH_CODE static void on_status(rf::RoleEvent event) noexcept;
+    CH572_HIGH_CODE static void on_status(rf::Event event) noexcept;
 
     CH572_HIGH_CODE void        process_rx(rf::Packet* packet) noexcept;
     CH572_HIGH_CODE void        process_tx() noexcept;
