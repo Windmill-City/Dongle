@@ -13,10 +13,9 @@ using ProcessCallback                             = void (*)(RoleEvent event);
 
 // Events reported to the role callback. These are deliberately independent
 // from the raw LLE IRQ bits, which are decoded inside rfip.cpp.
-inline constexpr RoleEvent     kEventRx           = 1u << 0;
-inline constexpr RoleEvent     kEventCrcError     = 1u << 1;
-inline constexpr RoleEvent     kEventTxFinish     = 1u << 2;
-inline constexpr RoleEvent     kEventTimeout      = 1u << 3;
+inline constexpr RoleEvent     kEventEr           = 1u << 0;
+inline constexpr RoleEvent     kEventTx           = 1u << 1;
+inline constexpr RoleEvent     kEventRx           = 1u << 2;
 
 inline constexpr std::uint8_t  kTxPowerMinus25Dbm = 0x01;
 inline constexpr std::uint8_t  kTxPowerMinus20Dbm = 0x02;

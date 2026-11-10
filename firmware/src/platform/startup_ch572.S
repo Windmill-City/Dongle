@@ -1,18 +1,9 @@
 /*
  * CH570/CH572 startup and vector table.
  *
- * The core starts at flash address 0, which jumps to the reset handler.  The
- * vector table is part of .highcode and is copied to RAM before mtvec is
+ * The vector table is part of .highcode and is copied to RAM before mtvec is
  * programmed, so the WCH fast interrupt mode (mtvec = base | 3) can be used.
  */
-
-    .section .init, "ax", @progbits
-    .global _start
-    .type _start, @function
-    .balign 2
-_start:
-    j .Lhandle_reset
-    .size _start, . - _start
 
     .section .vector, "ax", @progbits
     .balign 4
@@ -111,9 +102,11 @@ WDOG_BAT_IRQHandler:
 .Ldefault_handler:
     j .Ldefault_handler
 
-    .section .handle_reset, "ax", @progbits
+    .section .start, "ax", @progbits
     .balign 4
-.Lhandle_reset:
+    .global _start
+    .type _start, @function
+_start:
     .option push
     .option norelax
     la gp, __global_pointer$
@@ -177,3 +170,4 @@ WDOG_BAT_IRQHandler:
     la t0, main
     csrw mepc, t0
     mret
+    .size _start, . - _start

@@ -102,18 +102,18 @@ CH572_HIGH_CODE void rf_basic_process(std::uint32_t raw_irq) noexcept
     if (tx_done)
     {
         stop_lle_timer();
-        notify(kEventTxFinish);
+        notify(kEventTx);
     }
 
     if ((raw_irq & kLleRx) != 0)
     {
         stop_lle_timer();
-        notify((read_crc() == 0) ? kEventRx : kEventCrcError);
+        notify((read_crc() == 0) ? kEventRx : kEventEr);
     }
 
     if (!tx_done && (raw_irq & kLleTimeout) != 0)
     {
-        notify(kEventTimeout);
+        notify(kEventEr);
     }
 }
 

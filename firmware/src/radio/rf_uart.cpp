@@ -30,17 +30,13 @@ void RfUart::on_status(rf::RoleEvent event) noexcept
     {
         self->process_rx(&self->m_rx.packet);
     }
-    if ((event & rf::kEventCrcError) != 0 && !self->m_tx_in_flight)
+    if ((event & rf::kEventEr) != 0 && !self->m_tx_in_flight)
     {
         self->start_rx();
     }
-    if ((event & rf::kEventTxFinish) != 0)
+    if ((event & rf::kEventTx) != 0)
     {
         self->process_tx();
-    }
-    if ((event & rf::kEventTimeout) != 0 && !self->m_tx_in_flight)
-    {
-        self->start_rx();
     }
 }
 
