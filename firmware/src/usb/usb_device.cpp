@@ -2,7 +2,7 @@
 
 #include <cstring>
 
-#include "ch572/config.hpp"
+#include "ch572/compiler.hpp"
 #include "ch572/platform/registers.hpp"
 #include "ch572/usb/usb_common.hpp"
 

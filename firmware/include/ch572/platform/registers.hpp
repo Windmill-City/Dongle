@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "ch572/config.hpp"
+#include "ch572/compiler.hpp"
 
 namespace ch572 {
 

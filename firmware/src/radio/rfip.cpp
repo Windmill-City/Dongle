@@ -1,6 +1,6 @@
 #include "ch572/radio/rfip.hpp"
 
-#include "ch572/config.hpp"
+#include "ch572/compiler.hpp"
 #include "ch572/platform/registers.hpp"
 #include "ch572/radio/rfend.hpp"
 

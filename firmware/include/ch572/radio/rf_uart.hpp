@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "ch572/config.hpp"
+#include "ch572/compiler.hpp"
 #include "ch572/radio/rfip.hpp"
 #include "ch572/usb/usb_device.hpp"
 #include "ch572/util/ring_buffer.hpp"

@@ -21,7 +21,7 @@ firmware/
 ├─ Makefile
 ├─ ld/ch572.ld         链接脚本（Makefile 传入 Flash 窗口）
 ├─ include/ch572/
-│  ├─ config.hpp
+│  ├─ compiler.hpp
 │  ├─ platform/       寄存器、中断、时钟、SysTick
 │  ├─ usb/            USB 设备、CDC-ACM 描述符
 │  ├─ radio/          RFIP/RFRole、RFEND 校准、RF UART 协议
