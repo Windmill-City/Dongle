@@ -386,124 +386,164 @@ using RfEnd = Window<kRfEndBase>;
 
 namespace lle
 {
-inline constexpr std::size_t   Control    = 0x00;
-inline constexpr std::size_t   Config     = 0x04;
-inline constexpr std::size_t   WaitTime   = 0x06;
-inline constexpr std::size_t   Irq        = 0x08;
-inline constexpr std::size_t   Config2    = 0x0C;
-inline constexpr std::size_t   PhyControl = 0x50;
-inline constexpr std::size_t   Timer      = 0x64;
-inline constexpr std::size_t   TxDma      = 0x78;
-inline constexpr std::size_t   Timeout    = 0x7C;
-inline constexpr std::size_t   Config54   = 0x54;
+inline constexpr std::size_t   Control          = 0x00;
+inline constexpr std::size_t   Config           = 0x04;
+inline constexpr std::size_t   WaitTime         = 0x06;
+inline constexpr std::size_t   Irq              = 0x08;
+inline constexpr std::size_t   Config2          = 0x0C;
+inline constexpr std::size_t   PhyControl       = 0x50;
+inline constexpr std::size_t   Timer            = 0x64;
+inline constexpr std::size_t   TxDma            = 0x78;
+inline constexpr std::size_t   Timeout          = 0x7C;
+inline constexpr std::size_t   Config54         = 0x54;
 
 // Raw interrupt bits. The hardware names come from the five LLE timers; the
 // radio driver uses timer 0 as the RX timeout and timer 4 as the generic timer.
-inline constexpr std::uint32_t kIrqRx     = 1u << 0;
-inline constexpr std::uint32_t kIrqTxDone = 1u << 2;
-inline constexpr std::uint32_t kIrqTimer0 = 1u << 17;
-inline constexpr std::uint32_t kIrqTimer4 = 1u << 21;
+inline constexpr std::uint32_t kIrqRx           = 1u << 0;
+inline constexpr std::uint32_t kIrqTxDone       = 1u << 2;
+inline constexpr std::uint32_t kIrqTimer0       = 1u << 17;
+inline constexpr std::uint32_t kIrqTimer4       = 1u << 21;
+
+// Control commands and initial configuration used by the vendor BLE library.
+inline constexpr std::uint32_t kControlRx       = 1u;
+inline constexpr std::uint32_t kControlTx       = 2u;
+inline constexpr std::uint32_t kControlStop     = 8u;
+inline constexpr std::uint32_t kControlModeMask = 3u;
+inline constexpr std::uint32_t kConfigInit      = 0x1Eu;
+inline constexpr std::uint32_t kConfig2Init     = 0x20003u;
 } // namespace lle
 
 namespace bb
 {
-inline constexpr std::size_t   Control              = 0x00;
-inline constexpr std::size_t   CrcInit              = 0x04;
-inline constexpr std::size_t   CrcPoly              = 0x08;
-inline constexpr std::size_t   AccessAddress        = 0x0C;
-inline constexpr std::size_t   AccessAddressEx      = 0x10;
-inline constexpr std::size_t   Control1             = 0x14;
-inline constexpr std::size_t   Control2High         = 0x1E;
-inline constexpr std::size_t   Control2             = 0x1C;
-inline constexpr std::size_t   Control3             = 0x24;
-inline constexpr std::size_t   TxPower              = 0x34;
-inline constexpr std::size_t   RxConfig             = 0x3C;
-inline constexpr std::size_t   CrcStatus            = 0x40;
-inline constexpr std::size_t   RxCrcInit            = 0x58;
-inline constexpr std::size_t   RxCrcPoly            = 0x5C;
-inline constexpr std::size_t   RxAccessAddress      = 0x60;
-inline constexpr std::size_t   RxAccessAddressEx    = 0x64;
+inline constexpr std::size_t   Control                 = 0x00;
+inline constexpr std::size_t   CrcInit                 = 0x04;
+inline constexpr std::size_t   CrcPoly                 = 0x08;
+inline constexpr std::size_t   AccessAddress           = 0x0C;
+inline constexpr std::size_t   AccessAddressEx         = 0x10;
+inline constexpr std::size_t   Control1                = 0x14;
+inline constexpr std::size_t   Control2High            = 0x1E;
+inline constexpr std::size_t   Control2                = 0x1C;
+inline constexpr std::size_t   Control3                = 0x24;
+inline constexpr std::size_t   TxPower                 = 0x34;
+inline constexpr std::size_t   RxConfig2               = 0x38;
+inline constexpr std::size_t   RxConfig                = 0x3C;
+inline constexpr std::size_t   CrcStatus               = 0x40;
+inline constexpr std::size_t   RxCrcInit               = 0x58;
+inline constexpr std::size_t   RxCrcPoly               = 0x5C;
+inline constexpr std::size_t   RxAccessAddress         = 0x60;
+inline constexpr std::size_t   RxAccessAddressEx       = 0x64;
 
 // Control register fields.
-inline constexpr std::uint32_t kControlChannelMask  = 0x3Fu;
-inline constexpr std::uint32_t kControlWhiteningOff = 1u << 6;
+inline constexpr std::uint32_t kControlChannelMask     = 0x3Fu;
+inline constexpr std::uint32_t kControlWhiteningOff    = 1u << 6;
+inline constexpr std::uint32_t kControlPhyMask         = 0x3u << 8;
+inline constexpr std::uint32_t kControlModeMask        = 0x3u << 16;
+inline constexpr std::uint32_t kControlCalibrationMode = 1u << 21;
+inline constexpr std::uint32_t kControlIdleMode        = 1u << 16;
+inline constexpr std::uint32_t kControlStartTx         = 1u << 28;
+inline constexpr std::uint32_t kControl3PhyMask        = 0x3u << 25;
+
+// TX power register fields.
+inline constexpr std::uint32_t kTxPowerLevelMask       = 0x7Fu << 25;
+inline constexpr std::uint32_t kTxPowerLevelShift      = 25;
+inline constexpr std::uint32_t kTxPowerModeMask        = 0x3u;
+
+// CRC status fields.
+inline constexpr std::uint32_t kCrcStatusClear         = 0xFFFFu;
+inline constexpr std::uint32_t kCrcStatusRxAck         = 0x60u;
+inline constexpr std::uint32_t kCrcOkShift             = 5;
+inline constexpr std::uint32_t kCrcOkMask              = 1u;
+inline constexpr std::uint32_t kCrcPolyHighMask        = 0xFF000000u;
+inline constexpr std::uint32_t kCrcPolyLowMask         = 0x00FFFFFFu;
+
+// RX window registers.
+inline constexpr std::uint32_t kRxControl1Mask         = 0x3Fu;
+inline constexpr std::uint32_t kRxControl2Mask         = 0x3FFu;
 } // namespace bb
 
 // RFEND (0x4000D000) is absent from the CH572 datasheet and SVD. The offsets
-// and fields below were cross-checked against two reverse-engineering sources:
+// and fields below were cross-checked against:
+//   - the vendor libCH57xRF.a (RFEND_DevInit/RFEND_TXCtune disassembly)
 //   - cnlohr/ch32fun, extralibs/iSLER.h (covers CH570/CH572)
 //   - ArcaneNibble/project-nanjing (CH579 RFEND register notes)
 // Names are descriptive; WCH does not publish vendor names for this block.
 namespace rfend
 {
 // Register offsets.
-inline constexpr std::size_t   Control1               = 0x04;
-inline constexpr std::size_t   Control2               = 0x08;
-inline constexpr std::size_t   Control3               = 0x0C;
-inline constexpr std::size_t   TxBias                 = 0x28;
-inline constexpr std::size_t   TxControl1             = 0x2C;
-inline constexpr std::size_t   TxControl2             = 0x30;
-inline constexpr std::size_t   PhyConfig              = 0x34;
-inline constexpr std::size_t   DacRef                 = 0x38;
-inline constexpr std::size_t   Power                  = 0x3C;
-inline constexpr std::size_t   TuneControl            = 0x48;
-inline constexpr std::size_t   FilterControl          = 0x50;
-inline constexpr std::size_t   AdcControl             = 0x58;
-inline constexpr std::size_t   RxControl              = 0x5C;
-inline constexpr std::size_t   TuneResult             = 0x90;
-inline constexpr std::size_t   TuneResultGa           = 0x94;
-inline constexpr std::size_t   FilterResult           = 0x9C;
-inline constexpr std::size_t   TuneTableCoLow         = 0xA0;
-inline constexpr std::size_t   TuneTableCoHigh        = 0xB4;
-inline constexpr std::size_t   TuneTableGa            = 0xC8;
+inline constexpr std::size_t   Control1                  = 0x04;
+inline constexpr std::size_t   Control2                  = 0x08;
+inline constexpr std::size_t   Control3                  = 0x0C;
+inline constexpr std::size_t   TxBias                    = 0x28;
+inline constexpr std::size_t   TxControl1                = 0x2C;
+inline constexpr std::size_t   TxControl2                = 0x30;
+inline constexpr std::size_t   PhyConfig                 = 0x34;
+inline constexpr std::size_t   DacRef                    = 0x38;
+inline constexpr std::size_t   Power                     = 0x3C;
+inline constexpr std::size_t   TuneControl               = 0x48;
+inline constexpr std::size_t   FilterControl             = 0x50;
+inline constexpr std::size_t   AdcControl                = 0x58;
+inline constexpr std::size_t   RxControl                 = 0x5C;
+inline constexpr std::size_t   TuneResult                = 0x90;
+inline constexpr std::size_t   TuneResultGa              = 0x94;
+inline constexpr std::size_t   FilterResult              = 0x9C;
+inline constexpr std::size_t   TuneTableCoLow            = 0xA0; // 5 words, 2401->2440 MHz
+inline constexpr std::size_t   TuneTableCoHigh           = 0xB4; // 5 words, 2440->2480 MHz
+inline constexpr std::size_t   TuneTableGa               = 0xC8; // 3 words, nGA correction
 
 // Control1: one strobe per calibration step.
-inline constexpr std::uint32_t kControl1TuneStart     = 1u << 0;
-inline constexpr std::uint32_t kControl1TxCoarse      = 1u << 4;
-inline constexpr std::uint32_t kControl1TxFine        = 1u << 8;
-inline constexpr std::uint32_t kControl1RxFilter      = 1u << 12;
-inline constexpr std::uint32_t kControl1RxAdc         = 1u << 16;
+inline constexpr std::uint32_t kControl1TuneStart        = 1u << 0;
+inline constexpr std::uint32_t kControl1TxCoarse         = 1u << 4;
+inline constexpr std::uint32_t kControl1TxFine           = 1u << 8;
+inline constexpr std::uint32_t kControl1RxFilter         = 1u << 12;
+inline constexpr std::uint32_t kControl1RxAdc            = 1u << 16;
 
 // Control2: per-block calibration enables.
-inline constexpr std::uint32_t kControl2RxAdc         = 1u << 16;
-inline constexpr std::uint32_t kControl2TxCtune       = 1u << 17;
-inline constexpr std::uint32_t kControl2RxFilter      = 1u << 21;
+inline constexpr std::uint32_t kControl2RxAdc            = 1u << 16;
+inline constexpr std::uint32_t kControl2TxCtune          = 1u << 17;
+inline constexpr std::uint32_t kControl2RxFilter         = 1u << 21;
+inline constexpr std::uint32_t kControl2Calibration      = 0x33000000u;
+inline constexpr std::uint32_t kControl2CalibrationClear = 0xFFCDFFFFu;
 
 // Control3: start pulses for the RX filter/ADC state machines.
-inline constexpr std::uint32_t kControl3RxFilterStart = 1u << 4;
-inline constexpr std::uint32_t kControl3RxAdcStart    = 1u << 8;
-inline constexpr std::uint32_t kControl3CalPulse      = 1u << 12;
+inline constexpr std::uint32_t kControl3RxFilterStart    = 1u << 4;
+inline constexpr std::uint32_t kControl3RxAdcStart       = 1u << 8;
+inline constexpr std::uint32_t kControl3CalPulse         = 1u << 12;
 
 // TxBias: gates the TX bias during capacitance tuning.
-inline constexpr std::uint32_t kTxBiasCtuneEnable     = 1u << 12;
+inline constexpr std::uint32_t kTxBiasCtuneEnable        = 1u << 12;
 
 // TxControl1: enables the TX path during capacitance tuning.
-inline constexpr std::uint32_t kTxControl1TxEnable    = 1u << 4;
+inline constexpr std::uint32_t kTxControl1TxEnable       = 1u << 4;
+inline constexpr std::uint32_t kTxControl1ChannelBand    = 1u << 1;
+
+// PhyConfig: PHY configuration field.
+inline constexpr std::uint32_t kPhyConfigModeMask        = 0x700u;
 
 // DacRef: nCO/nGA tuning results plus the tuning cycle count.
-inline constexpr std::uint32_t kDacRefCoMask          = 0x3Fu;
-inline constexpr std::uint32_t kDacRefCoShift         = 0;
-inline constexpr std::uint32_t kDacRefTuneMask        = 0x1FFu;
-inline constexpr std::uint32_t kDacRefTuneShift       = 8;
-inline constexpr std::uint32_t kDacRefGaMask          = 0x7Fu;
-inline constexpr std::uint32_t kDacRefGaShift         = 24;
+inline constexpr std::uint32_t kDacRefCoMask             = 0x3Fu;
+inline constexpr std::uint32_t kDacRefCoShift            = 0;
+inline constexpr std::uint32_t kDacRefTuneMask           = 0x1FFu;
+inline constexpr std::uint32_t kDacRefTuneShift          = 8;
+inline constexpr std::uint32_t kDacRefGaMask             = 0x7Fu;
+inline constexpr std::uint32_t kDacRefGaShift            = 24;
 
 // FilterControl: RX filter tuning code, bandwidth and enable.
-inline constexpr std::uint32_t kFilterTuneMask        = 0x1Fu;
-inline constexpr std::uint32_t kFilterBandwidthMask   = 0x7u << 8;
-inline constexpr std::uint32_t kFilterBandwidth2M     = 0x3u << 8;
-inline constexpr std::uint32_t kFilterEnable          = 1u << 16;
+inline constexpr std::uint32_t kFilterTuneMask           = 0x1Fu;
+inline constexpr std::uint32_t kFilterBandwidthMask      = 0x7u << 8;
+inline constexpr std::uint32_t kFilterBandwidth2M        = 0x3u << 8;
+inline constexpr std::uint32_t kFilterEnable             = 1u << 16;
 
 // AdcControl: RX ADC calibration gate.
-inline constexpr std::uint32_t kAdcControlEnable      = 1u << 16;
+inline constexpr std::uint32_t kAdcControlEnable         = 1u << 16;
 
 // Calibration results.
-inline constexpr std::uint32_t kTuneResultCoMask      = 0x3Fu;
-inline constexpr std::uint32_t kTuneDoneMask          = (1u << 25) | (1u << 26);
-inline constexpr std::uint32_t kTuneResultGaMask      = 0x7Fu << 10;
-inline constexpr std::uint32_t kTuneResultGaShift     = 10;
-inline constexpr std::uint32_t kFilterResultDone      = 1u << 8;
-inline constexpr std::uint32_t kFilterResultMask      = 0x1Fu;
+inline constexpr std::uint32_t kTuneResultCoMask         = 0x3Fu;
+inline constexpr std::uint32_t kTuneDone                 = 1u << 25;
+inline constexpr std::uint32_t kTuneActive               = 1u << 26;
+inline constexpr std::uint32_t kTuneResultGaMask         = 0x7Fu << 10;
+inline constexpr std::uint32_t kTuneResultGaShift        = 10;
+inline constexpr std::uint32_t kFilterResultDone         = 1u << 8;
+inline constexpr std::uint32_t kFilterResultMask         = 0x1Fu;
 } // namespace rfend
 
 } // namespace radio_reg
