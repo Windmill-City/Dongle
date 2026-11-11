@@ -157,7 +157,7 @@ void RfUart::on_status(rf::Event event) noexcept
 void RfUart::start_tx() noexcept
 {
     m_tx_in_flight = true;
-    rf::start_tx(&m_tx);
+    rf::set_tx(&m_tx);
 }
 
 void RfUart::start_rx() noexcept

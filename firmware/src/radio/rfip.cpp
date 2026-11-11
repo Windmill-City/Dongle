@@ -207,7 +207,7 @@ std::uint8_t read_crc() noexcept
 
 } // namespace
 
-void start_tx(Frame* frame) noexcept
+void set_tx(Frame* frame) noexcept
 {
     if (frame == nullptr)
     {
