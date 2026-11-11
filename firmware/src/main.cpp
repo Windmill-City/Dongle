@@ -12,10 +12,6 @@ int                            main()
     sysreg::disable_watchdog_reset();
     clock::init();
 
-    // Start the free-running SysTick that drives the master poll scheduler.
-    systick::now()  = 0;
-    systick::ctrl() = systick::kCtrlEnable;
-
     // Release SWD and the USB PHY before sampling; otherwise PA0/PA1 are not
     // GPIO and the internal pull-ups cannot reach the pads.
     sysreg::pin_alternate() &= ~(sysreg::kPinDebugEnable | sysreg::kPinUsbEnable | sysreg::kUdpPullUpEnable);
