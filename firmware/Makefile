@@ -18,9 +18,10 @@ CXXFLAGS      := $(ARCH) -Os -std=c++17 \
 ASFLAGS       := $(ARCH) -x assembler-with-cpp
 INCLUDES      := -Iinclude
 
-COMMON_CXX    := src/platform/clock.cpp src/platform/pins.cpp
+COMMON_CXX    := src/platform/clock.cpp
 APP_CXX       := src/main.cpp \
                  src/usb/usb_device.cpp \
+                 src/serial/uart.cpp \
                  src/radio/rfip.cpp src/radio/rf_uart.cpp src/radio/rfend.cpp
 
 LDSCRIPT      := ld/ch572.ld

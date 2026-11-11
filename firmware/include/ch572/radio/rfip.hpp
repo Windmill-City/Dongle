@@ -8,14 +8,14 @@
 namespace ch572::rf
 {
 
-using Event                                   = std::uint32_t;
+using Event                                       = std::uint32_t;
 using ProcessCallback                             = void (*)(Event event);
 
 // Events reported to the role callback. These are deliberately independent
 // from the raw LLE IRQ bits, which are decoded inside rfip.cpp.
-inline constexpr Event     kEventEr           = 1u << 0;
-inline constexpr Event     kEventTx           = 1u << 1;
-inline constexpr Event     kEventRx           = 1u << 2;
+inline constexpr Event         kEventEr           = 1u << 0;
+inline constexpr Event         kEventTx           = 1u << 1;
+inline constexpr Event         kEventRx           = 1u << 2;
 
 inline constexpr std::uint8_t  kTxPowerMinus25Dbm = 0x01;
 inline constexpr std::uint8_t  kTxPowerMinus20Dbm = 0x02;
@@ -44,9 +44,12 @@ inline constexpr std::uint8_t  kLinkWaitTime      = static_cast<std::uint8_t>(kR
 
 // Packet header at the DMA base. The hardware takes the payload length from
 // the second byte of the first word, so `length` must stay at offset 1.
+// The low nibble of byte 0 is the sub-command and the high nibble is the
+// sequence. Direction is implicit: only the master sends requests and only the
+// slave sends responses, so no direction bit is needed.
 struct CH572_PACKED Packet
 {
-    std::uint8_t type    : 4;
+    std::uint8_t command : 4;
     std::uint8_t sequence: 4;
     std::uint8_t length;
 };

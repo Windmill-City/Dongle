@@ -1,13 +1,24 @@
 #include "ch572/radio/rf_uart.hpp"
 
+#include <cstring>
+
 #include "ch572/platform/registers.hpp"
+#include "ch572/serial/uart.hpp"
 
 namespace ch572::rf_uart
 {
 namespace
 {
 
-RfUart* g_instance = nullptr;
+RfUart*         g_instance = nullptr;
+
+// The master's local side is the USB CDC port; the slave's is the UART that
+// shares the USB-A pads.
+CH572_HIGH_CODE std::size_t
+                read_local(usb::UsbDevice& usb, Role role, std::uint8_t* dst, std::size_t max_length) noexcept
+{
+    return role == Role::master ? usb.read_host(dst, max_length) : serial::read(dst, max_length);
+}
 
 } // namespace
 
@@ -17,13 +28,15 @@ void RfUart::init() noexcept
 
     rf::init(&RfUart::on_status);
 
-
     m_waiting = false;
 
     if (m_role == Role::master)
     {
-        m_seq      = 0;
-        m_deadline = systick::now();
+        m_seq                 = 0;
+        m_deadline            = systick::now();
+
+        // Prime the slave with the host's line coding on the first exchange.
+        m_line_coding_pending = true;
     }
     else
     {
@@ -33,10 +46,29 @@ void RfUart::init() noexcept
     }
 }
 
+void RfUart::set_line_coding(const serial::LineCoding& coding) noexcept
+{
+    if (m_role != Role::master)
+    {
+        return;
+    }
+
+    m_line_coding         = coding;
+    m_line_coding_pending = true;
+}
+
 void RfUart::poll() noexcept
 {
     if (m_role != Role::master)
     {
+        // Forward radio payloads to the local serial port; the UART interrupt
+        // buffers the other direction.
+        std::uint8_t buffer[rf::kMaxPayload];
+        std::size_t  length = 0;
+        while ((length = m_rf_buffer.read(buffer, sizeof(buffer))) != 0)
+        {
+            serial::write(buffer, length);
+        }
         return;
     }
 
@@ -65,12 +97,28 @@ void RfUart::poll() noexcept
         return;
     }
 
-    auto&             out    = m_tx.packet;
-    const std::size_t length = m_usb.read_host(m_tx.payload, rf::kMaxPayload);
+    auto& out = m_tx.packet;
 
-    out.type     = kPacketRequest;
-    out.sequence = m_seq;
-    out.length   = static_cast<std::uint8_t>(length);
+    if (m_line_coding_pending)
+    {
+        // A line-coding request replaces one data poll. It is sent with the
+        // current sequence, so the normal retry path keeps repeating it until
+        // the slave answers.
+        std::memcpy(m_tx.payload, &m_line_coding, sizeof(serial::LineCoding));
+        m_line_coding_pending = false;
+
+        out.command           = kCommandLineCoding;
+        out.sequence          = m_seq;
+        out.length            = static_cast<std::uint8_t>(sizeof(serial::LineCoding));
+    }
+    else
+    {
+        const std::size_t length = read_local(m_usb, m_role, m_tx.payload, rf::kMaxPayload);
+
+        out.command              = kCommandData;
+        out.sequence             = m_seq;
+        out.length               = static_cast<std::uint8_t>(length);
+    }
 
     m_waiting  = true;
     m_deadline = systick::now() + kResponseTimeoutTicks;
@@ -122,8 +170,8 @@ void RfUart::start_rx() noexcept
 void RfUart::process_master_rsp(rf::Packet* packet) noexcept
 {
     // Only the response to the outstanding request is useful. Anything else is
-    // a stale or foreign frame, so keep listening until the deadline.
-    if (packet->type != kPacketResponse || !m_waiting || packet->sequence != m_seq)
+    // a stale frame, so keep listening until the deadline.
+    if (!m_waiting || packet->sequence != m_seq)
     {
         if (!m_tx_in_flight)
         {
@@ -144,26 +192,27 @@ void RfUart::process_master_rsp(rf::Packet* packet) noexcept
 
 void RfUart::process_slave_req(rf::Packet* packet) noexcept
 {
-    if (packet->type != kPacketRequest)
-    {
-        if (!m_tx_in_flight)
-        {
-            start_rx();
-        }
-        return;
-    }
-
     auto& out = m_tx.packet;
     if (packet->sequence != m_seq)
     {
         m_seq = packet->sequence;
-        if (packet->length != 0 && packet->length <= rf::kMaxPayload)
+
+        if (packet->command == kCommandLineCoding)
+        {
+            if (static_cast<std::size_t>(packet->length) == sizeof(serial::LineCoding))
+            {
+                serial::LineCoding coding;
+                std::memcpy(&coding, packet + 1, sizeof(coding));
+                serial::configure(coding);
+            }
+        }
+        else if (packet->length != 0 && packet->length <= rf::kMaxPayload)
         {
             m_rf_buffer.write(packet + 1, packet->length);
         }
 
-        const std::size_t length = m_usb.read_host(m_tx.payload, rf::kMaxPayload);
-        out.type                 = kPacketResponse;
+        const std::size_t length = read_local(m_usb, m_role, m_tx.payload, rf::kMaxPayload);
+        out.command              = packet->command;
         out.sequence             = packet->sequence;
         out.length               = static_cast<std::uint8_t>(length);
     }

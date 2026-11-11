@@ -1,6 +1,7 @@
 #include "ch572/platform/clock.hpp"
 #include "ch572/platform/registers.hpp"
 #include "ch572/radio/rf_uart.hpp"
+#include "ch572/serial/uart.hpp"
 #include "ch572/usb/usb_device.hpp"
 
 using namespace ch572;
@@ -29,10 +30,16 @@ int                            main()
     auto&           usb = usb::UsbDevice::instance();
     rf_uart::RfUart rf(usb, host ? rf_uart::Role::master : rf_uart::Role::slave);
 
+    enable_global_irq();
+
     if (host)
     {
         usb.init();
         usb.set_source(&rf);
+    }
+    else
+    {
+        serial::init();
     }
 
     rf.init();

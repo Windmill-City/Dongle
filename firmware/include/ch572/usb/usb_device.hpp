@@ -5,6 +5,7 @@
 
 #include "ch572/compiler.hpp"
 #include "ch572/platform/registers.hpp"
+#include "ch572/serial/line_coding.hpp"
 #include "ch572/util/ring_buffer.hpp"
 
 namespace ch572::rf_uart
@@ -56,6 +57,8 @@ class UsbDevice
     std::uint8_t         m_setup_type    = 0;
     std::uint8_t         m_setup_length  = 0;
     const std::uint8_t*  m_descriptor    = nullptr;
+
+    serial::LineCoding   m_line_coding{115200u, serial::kStopBits1, serial::kParityNone, 8};
 
     alignas(4) std::uint8_t m_ep0_buffer[kEp0Size]{};
     alignas(4) std::uint8_t m_ep1_buffer[8]{};

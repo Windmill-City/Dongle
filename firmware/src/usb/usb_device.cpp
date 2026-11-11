@@ -14,24 +14,13 @@ namespace
 {
 
 // CDC ACM class requests.
-constexpr std::uint8_t kCdcGetLineCoding               = 0x21;
+constexpr std::uint8_t kCdcSetLineCoding = 0x20;
+constexpr std::uint8_t kCdcGetLineCoding = 0x21;
 
-constexpr std::uint8_t kStall                          = 0xFF;
-constexpr std::uint8_t kTokenOut                       = 0x00;
-constexpr std::uint8_t kTokenIn                        = 0x20;
-constexpr std::uint8_t kToggleOk                       = 0x40;
-
-// The RF link runs at a fixed 2 Mbps, so the local CDC line settings are only
-// a formality; report a fixed 115200 8N1 and accept any SET_LINE_CODING.
-constexpr std::uint8_t kLineCoding[kCdcLineCodingSize] = {
-    0x00,
-    0xC2,
-    0x01,
-    0x00, // 115200
-    0x00, // one stop bit
-    0x00, // no parity
-    0x08, // eight data bits
-};
+constexpr std::uint8_t kStall            = 0xFF;
+constexpr std::uint8_t kTokenOut         = 0x00;
+constexpr std::uint8_t kTokenIn          = 0x20;
+constexpr std::uint8_t kToggleOk         = 0x40;
 
 } // namespace
 
@@ -45,13 +34,6 @@ void UsbDevice::init()
 {
     sysreg::pin_alternate() &= ~sysreg::kPinDebugEnable;
     endpoint_init();
-
-    // WCH implements the global interrupt enable in the custom CSR 0x800
-    // (PFIC_EnableAllIRQ writes 0x800 = 0x88); mstatus alone does not gate
-    // PFIC interrupts. Without this the USB interrupt never fires and the
-    // host reports a device-descriptor failure.
-    constexpr std::uint32_t kGlobalIrqEnable = 0x88u;
-    asm volatile("csrw 0x800, %0" : : "r"(kGlobalIrqEnable) : "memory");
 }
 
 void UsbDevice::endpoint_init()
@@ -213,14 +195,14 @@ void UsbDevice::handle_setup()
     }
     else if (request_type == kRequestTypeClass)
     {
-        if (data_direction == 0)
+        if (data_direction != 0 && m_setup_request == kCdcGetLineCoding)
         {
-            length = 0;
+            length = static_cast<std::uint8_t>(kCdcLineCodingSize);
+            std::memcpy(m_ep0_buffer, &m_line_coding, kCdcLineCodingSize);
         }
         else
         {
-            length = static_cast<std::uint8_t>(kCdcLineCodingSize);
-            std::memcpy(m_ep0_buffer, kLineCoding, kCdcLineCodingSize);
+            length = 0;
         }
     }
     else
@@ -278,6 +260,20 @@ void UsbDevice::irq_handler()
                 break;
 
             case kTokenOut | 0:
+                // SET_LINE_CODING carries its seven bytes in the OUT data
+                // stage, so take them once EP0 has received the packet. The
+                // SIE reports the packet even while the data stage is NAKed,
+                // so do not gate this on the toggle bit.
+                if (m_setup_type == kRequestTypeClass && m_setup_request == kCdcSetLineCoding
+                    && static_cast<std::size_t>(length) == sizeof(serial::LineCoding))
+                {
+                    std::memcpy(&m_line_coding, m_ep0_buffer, sizeof(serial::LineCoding));
+                    if (m_source != nullptr)
+                    {
+                        m_source->set_line_coding(m_line_coding);
+                    }
+                }
+
                 if (toggle_ok)
                 {
                     usbreg::ep0_ctrl() =

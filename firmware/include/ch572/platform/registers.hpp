@@ -56,6 +56,23 @@ inline void irq_restore(std::uint32_t state) noexcept
     asm volatile("csrw 0x800, %0" : : "r"(state) : "memory");
 }
 
+// WCH implements the global interrupt enable in the custom CSR 0x800
+// (PFIC_EnableAllIRQ writes 0x800 = 0x88); mstatus alone does not gate PFIC
+// interrupts. Must be set once before any peripheral interrupt is used.
+inline void enable_global_irq() noexcept
+{
+    constexpr std::uint32_t kGlobalIrqEnable = 0x88u;
+    asm volatile("csrw 0x800, %0" : : "r"(kGlobalIrqEnable) : "memory");
+}
+
+// Clears the global interrupt-enable bit while keeping the previous-enable
+// shadow, matching the value the vendor PFIC_DisableAllIRQ() writes.
+inline void disable_global_irq() noexcept
+{
+    constexpr std::uint32_t kGlobalIrqDisable = 0x80u;
+    asm volatile("csrw 0x800, %0" : : "r"(kGlobalIrqDisable) : "memory");
+}
+
 class CriticalSection
 {
   public:
