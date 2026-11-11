@@ -5,19 +5,6 @@
 
 namespace ch572::clock
 {
-namespace
-{
-
-// 100MHz
-constexpr std::uint8_t kSysClockSelectHse = 0xC0;
-constexpr std::uint8_t kSysClockSelectPll = 0x40;
-constexpr std::uint8_t kPll               = kSysClockSelectPll | 6;
-constexpr std::uint8_t kPowerPlanEnable   = 0x40;
-constexpr std::uint8_t kFlashPllConfig    = 0x01;
-constexpr std::uint8_t kFlashSckPll       = 1u << 4;
-constexpr std::uint8_t kHseCapacitance    = 0x10; // 8pF
-
-} // namespace
 
 CH572_HIGH_CODE void init() noexcept
 {

@@ -3,22 +3,50 @@
 #include "ch572/radio/rf_uart.hpp"
 #include "ch572/usb/usb_device.hpp"
 
-int main()
-{
-    using namespace ch572;
+using namespace ch572;
 
+inline constexpr std::uint32_t kUsbDataPins = gpio::kPin0 | gpio::kPin1;
+
+int                            main()
+{
     sysreg::disable_watchdog_reset();
     clock::init();
 
-    auto& usb = usb::UsbDevice::instance();
-    usb.init();
+    // Start the free-running SysTick that drives the master poll scheduler.
+    systick::now()  = 0;
+    systick::ctrl() = systick::kCtrlEnable;
 
-    rf_uart::RfUart rf(usb);
-    usb.set_source(&rf);
+    // Release SWD and the USB PHY before sampling; otherwise PA0/PA1 are not
+    // GPIO and the internal pull-ups cannot reach the pads.
+    sysreg::pin_alternate() &= ~(sysreg::kPinDebugEnable | sysreg::kPinUsbEnable | sysreg::kUdpPullUpEnable);
+
+    gpio::pa::pull_down() &= ~kUsbDataPins;
+    gpio::pa::pull_up() |= kUsbDataPins;
+    gpio::pa::dir() &= ~kUsbDataPins;
+
+    systick::delay(100 * clock::kTicksPerUs);
+
+    const bool host = (gpio::pa::pin() & kUsbDataPins) == 0;
+
+    gpio::pa::pull_up() &= ~kUsbDataPins;
+
+    auto&           usb = usb::UsbDevice::instance();
+    rf_uart::RfUart rf(usb, host ? rf_uart::Role::master : rf_uart::Role::slave);
+
+    if (host)
+    {
+        usb.init();
+        usb.set_source(&rf);
+    }
+
     rf.init();
 
     for (;;)
     {
-        usb.poll();
+        if (host)
+        {
+            usb.poll();
+        }
+        rf.poll();
     }
 }
