@@ -39,7 +39,7 @@ inline constexpr std::uint32_t kLinkAccessAddress = 0x57250425u;
 inline constexpr std::uint32_t kLinkCrcInit       = 0x555555u;
 inline constexpr std::uint32_t kLinkCrcPoly       = 0x80032Du;
 inline constexpr std::uint8_t  kLinkTxPower       = kTxPower0Dbm;
-inline constexpr std::uint8_t  kRfOnUs            = 20;
+inline constexpr std::uint8_t  kRfOnUs            = 80;
 inline constexpr std::uint8_t  kLinkWaitTime      = static_cast<std::uint8_t>(kRfOnUs * 2u);
 
 // Packet header at the DMA base. The hardware takes the payload length from
@@ -56,7 +56,7 @@ struct CH572_PACKED Packet
 
 static_assert(sizeof(Packet) == 2, "RF packet header is two bytes");
 
-inline constexpr std::size_t  kMaxPayload = 64;
+inline constexpr std::size_t  kMaxPayload = 240;
 inline constexpr std::uint8_t kMaxPacket  = static_cast<std::uint8_t>(kMaxPayload + sizeof(Packet));
 
 // One DMA frame: packet header followed by the payload. TX and RX share the
@@ -68,7 +68,8 @@ struct alignas(4) Frame
 };
 
 static_assert(offsetof(Frame, payload) == sizeof(Packet), "RF payload is contiguous");
-static_assert(sizeof(Frame) == 68, "RF frame is header plus payload");
+static_assert(sizeof(Frame) >= sizeof(Packet) + kMaxPayload, "RF frame holds header plus payload");
+static_assert(sizeof(Frame) % 4 == 0, "RF frame keeps the DMA base aligned");
 
 void                 init(ProcessCallback process_cb) noexcept;
 CH572_HIGH_CODE void set_tx(Frame* frame) noexcept;
@@ -76,5 +77,8 @@ CH572_HIGH_CODE void set_rx(Frame* frame, std::uint32_t timeout) noexcept;
 
 CH572_HIGH_CODE void lle_irq_handler() noexcept;
 CH572_HIGH_CODE void bb_irq_handler() noexcept;
+
+
+
 
 } // namespace ch572::rf

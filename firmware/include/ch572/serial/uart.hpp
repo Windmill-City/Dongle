@@ -13,7 +13,7 @@ namespace ch572::serial
 // Received bytes are buffered from the UART interrupt so the radio side can
 // take a whole request even though the hardware FIFO is only eight bytes.
 inline constexpr std::uint32_t kBaudRate     = 115200;
-inline constexpr std::size_t   kRxBufferSize = 256;
+inline constexpr std::size_t   kRxBufferSize = 512;
 
 void                           init(std::uint32_t baud = kBaudRate) noexcept;
 

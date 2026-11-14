@@ -13,7 +13,7 @@
 namespace ch572::rf_uart
 {
 
-inline constexpr std::size_t kRfBufferSize = 256;
+inline constexpr std::size_t kRfBufferSize = 1024;
 
 // The link has one master and one slave. The master polls with a REQ and the
 // slave answers with one RSP; the REQ payload carries the master's local data
@@ -26,12 +26,16 @@ enum class Role : std::uint8_t
     slave,
 };
 
-inline constexpr std::uint32_t kPollIntervalMs       = 10;
-inline constexpr std::uint32_t kResponseTimeoutMs    = 3;
+inline constexpr std::uint32_t kPollIntervalMs       = 6;
+inline constexpr std::uint32_t kResponseTimeoutMs    = 5;
+inline constexpr std::uint32_t kSlaveResponseDelayMs = 1;
+inline constexpr std::uint32_t kTxWatchdogMs         = 15;
 inline constexpr std::uint32_t kSequenceMask         = 0x0Fu;
 
 inline constexpr std::uint32_t kPollIntervalTicks    = kPollIntervalMs * clock::kTicksPerMs;
 inline constexpr std::uint32_t kResponseTimeoutTicks = kResponseTimeoutMs * clock::kTicksPerMs;
+inline constexpr std::uint32_t kSlaveResponseDelayTicks = kSlaveResponseDelayMs * clock::kTicksPerMs;
+inline constexpr std::uint32_t kTxWatchdogTicks      = kTxWatchdogMs * clock::kTicksPerMs;
 
 inline constexpr std::uint8_t  kCommandData          = 0;
 inline constexpr std::uint8_t  kCommandLineCoding    = 1;
@@ -69,12 +73,22 @@ class RfUart final
     rf::Frame                   m_rx;
 
     Role                        m_role;
-    std::uint32_t               m_deadline     = 0;
-    std::uint8_t                m_seq          = 0;
+    volatile std::uint32_t      m_deadline     = 0;
+    volatile std::uint8_t       m_seq          = 0;
 
     // Master: a request is outstanding, the slave owes a response.
     volatile bool               m_waiting      = false;
     volatile bool               m_tx_in_flight = false;
+
+    // Slave: a response is queued. It is sent from poll() after a short delay
+    // rather than from the RX interrupt, so the master has time to re-arm its
+    // receiver before the response hits the air and the two sides can never
+    // transmit in lockstep.
+    volatile bool               m_tx_pending   = false;
+    volatile std::uint32_t      m_tx_after     = 0;
+
+    // Guards against a lost TX-done interrupt wedging the state machine.
+    volatile std::uint32_t      m_tx_deadline  = 0;
 
     // Master: the latest host line coding and whether it still has to reach
     // the slave. Written from the USB interrupt, consumed in poll().

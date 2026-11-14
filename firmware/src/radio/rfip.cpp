@@ -1,8 +1,19 @@
-#include "ch572/radio/rfip.hpp"
+﻿#include "ch572/radio/rfip.hpp"
+
+#include <cstring>
 
 #include "ch572/compiler.hpp"
 #include "ch572/platform/registers.hpp"
 #include "ch572/radio/rfend.hpp"
+
+// Register-level 2.4G radio driver.
+//
+// Every sequence below mirrors the vendor CH57x RF library instruction for
+// instruction (RFEND_DevInit, RFIP_WakeUpRegInit, RFIP_Calibration,
+// RFIP_StartTx, RFIP_SetRx, RFIP_SetPHYTxMode, RFIP_SetPHYRxMode,
+// RFIP_SetChannel and the two interrupt handlers), specialised for the fixed
+// link configuration used by this firmware: 2 Mbps PHY, whitening on,
+// channel 17, 24-bit CRC, 160 us synthesizer hold time.
 
 namespace ch572::rf
 {
@@ -13,102 +24,88 @@ namespace
 using radio_reg::Bb;
 using radio_reg::Lle;
 using radio_reg::RfEnd;
-namespace lle                                      = radio_reg::lle;
-namespace bb                                       = radio_reg::bb;
-namespace reg                                = radio_reg::rfend;
-namespace rfend                                    = ch572::rfend;
 
-ProcessCallback                g_process_cb        = nullptr;
-std::uint32_t                  g_wait_recv_time    = 0;
+namespace lle = radio_reg::lle;
+namespace bb  = radio_reg::bb;
+namespace reg = radio_reg::rfend;
 
-// Vendor LLE PHY-control values for each radio mode.
-inline constexpr std::uint32_t kLlePhyCalibration  = 0x000F05D8u;
-inline constexpr std::uint32_t kLlePhyTx           = 0x000F02D8u;
-inline constexpr std::uint32_t kLlePhyRx           = 0x000F01D8u;
-inline constexpr std::uint32_t kLlePhyIdle         = 0x000F0080u;
+ProcessCallback g_process_cb = nullptr;
 
-// Vendor BB configuration values.
-inline constexpr std::uint32_t kBbRxConfigValue    = 64u;
-inline constexpr std::uint32_t kBbRxConfig2Value   = 0x20018u;
-inline constexpr std::uint32_t kBbRxControl1Value  = 13u;
-inline constexpr std::uint32_t kBbRxControl2Value  = 160u;
-inline constexpr std::uint32_t kBbRxControl2High   = 127u;
-inline constexpr std::uint32_t kBbReceiveDone      = 1u << 6;
-inline constexpr std::uint32_t kBbTxPowerBoost     = 0x40u;
-inline constexpr std::uint32_t kBbTxPowerStartMode = 1u;
+// The hardware writes one frame plus trailing CRC/status bytes into this
+// buffer; the usable part is copied into the caller's frame on RX.
+alignas(4) std::uint8_t g_rx_dma[264];
 
-// Sleep-clock gates cleared during radio init.
-inline constexpr std::uint32_t kSleepClkOffBle     = 1u << 7;
-inline constexpr std::uint32_t kSleepClkOff2Mask   = 0x13u;
+Frame* g_rx_frame = nullptr;
 
-// LLE wait time and fine-tune threshold.
-inline constexpr std::uint32_t kRxWaitTime         = 4u;
-inline constexpr std::uint32_t kTxFineTuneWait     = 40u;
+// LLE receive-window length, refreshed by set_phy_rx_mode().
+std::uint32_t g_wait_recv_time = 0;
 
-// Vendor LLE duration formulas.
-inline constexpr std::uint32_t kTxLengthShift      = 8;
-inline constexpr std::uint32_t kTxLengthMask       = 0xFFu;
-inline constexpr std::uint32_t kTxLengthOverhead   = 11u;
-inline constexpr std::uint32_t kTxByteTicks        = 4u;
-inline constexpr std::uint32_t kTxWaitDivisor      = 2u;
-inline constexpr std::uint32_t kTxFixedTicks       = 44u;
-inline constexpr std::uint32_t kLleTickScale       = 2u;
-inline constexpr std::uint32_t kRxLengthOverhead   = 3u;
-inline constexpr std::uint32_t kRxByteTicks        = 8u;
-inline constexpr std::uint32_t kRxFixedTicks       = 60u;
+// PHY properties: 2 Mbps PHY (bits 5:4 = 01), data whitening enabled.
+inline constexpr std::uint32_t kProperties = 0x10u;
 
-CH572_HIGH_CODE void           rf_basic_process(std::uint32_t raw_irq) noexcept;
-void                           wakeup() noexcept;
-void                           calibration() noexcept;
-CH572_HIGH_CODE std::uint8_t read_crc() noexcept;
+// LLE timer 0 is the generic timeout source used by TX/RX.
+inline constexpr std::uint32_t kLleTimer0     = 1u << 17;
 
-inline std::uint32_t         read_u32(const void* address) noexcept
+// LLE PHY_CONTROL values for each radio state.
+inline constexpr std::uint32_t kPhyCalibration = 0x000F05D8u;
+inline constexpr std::uint32_t kPhyTx          = 0x000F02D8u;
+inline constexpr std::uint32_t kPhyRx          = 0x000F01D8u;
+inline constexpr std::uint32_t kPhyIdle        = 0x000F0080u;
+
+// BB control fields.
+inline constexpr std::uint32_t kControlModeMask = 0x3u << 16;
+inline constexpr std::uint32_t kControlPhyMask  = 0x3u << 8;
+inline constexpr std::uint32_t kControlCalib    = 1u << 17;
+inline constexpr std::uint32_t kControlIdle     = 1u << 16;
+
+// LLE wake-up configuration.
+inline constexpr std::uint32_t kLleConfigInit   = 0x1Eu;
+inline constexpr std::uint32_t kLleConfig2Init  = 0x20003u;
+inline constexpr std::uint32_t kBleClkGate1     = 1u << 7;
+inline constexpr std::uint32_t kBleClkGate2     = 0x13u;
+
+// BB wake-up configuration.
+inline constexpr std::uint32_t kBbCrcClear      = 0xFFFFu;
+inline constexpr std::uint32_t kBbRxConfig      = 64u;
+inline constexpr std::uint32_t kBbRxConfig2     = 0x2071Fu;
+
+// RFEND calibration strobes.
+inline constexpr std::uint32_t kCalEnable       = 0x00130000u;
+inline constexpr std::uint32_t kCalClear        = 0xFFCDFFFFu;
+inline constexpr std::uint32_t kTxBiasCal       = 1u << 11;
+inline constexpr std::uint32_t kControl3Cal     = 1u << 12;
+
+// BB control register holds the BLE channel index in its low seven bits.
+inline constexpr std::uint32_t kChannelMask      = 0x7Fu;
+
+// PHY receive setup for the 2 Mbps mode.
+inline constexpr std::uint32_t kBbRxControl1     = 13u;
+inline constexpr std::uint32_t kBbRxControl2     = 160u;
+inline constexpr std::uint32_t kBbRxControl2High = 127u;
+inline constexpr std::uint32_t kRxWaitTime       = 4u;
+
+// PHY transmit timing: (length + 11) * 4 + wait/2 + 80, in 0.5 us ticks.
+inline constexpr std::uint32_t kTxLengthOverhead = 11u;
+inline constexpr std::uint32_t kTxByteTicks      = 4u;
+inline constexpr std::uint32_t kTxFixedTicks     = 80u;
+inline constexpr std::uint32_t kTxFineTuneWait   = 40u;
+
+// RX window: (length + 3) * 8 + 60, in 0.5 us ticks.
+inline constexpr std::uint32_t kRxLengthOverhead = 3u;
+inline constexpr std::uint32_t kRxByteTicks      = 8u;
+inline constexpr std::uint32_t kRxFixedTicks     = 60u;
+
+// Analog settle loops taken from the vendor driver.
+inline constexpr int           kInitSettleLoops  = 100;
+inline constexpr int           kPhySettleLoops   = 40;
+
+CH572_HIGH_CODE void rf_basic_process(std::uint32_t status) noexcept;
+void                 wakeup() noexcept;
+void                 calibration() noexcept;
+
+CH572_HIGH_CODE std::uint8_t read_crc() noexcept
 {
-    return *static_cast<const std::uint32_t*>(address);
-}
-
-CH572_HIGH_CODE void start_lle_timer(std::uint32_t total, std::uint32_t bit) noexcept
-{
-    const std::uint32_t saved = Lle::r32(lle::Config2);
-    Lle::r32(lle::Config2)    = saved & ~bit;
-    fence_i();
-    Lle::r32(lle::Irq)     = bit;
-    Lle::r32(lle::Timer)   = total;
-    Lle::r32(lle::Config2) = saved;
-}
-
-CH572_HIGH_CODE void configure_channel(std::uint32_t channel) noexcept
-{
-    RfEnd::r32(reg::TxControl1) &= ~reg::kTxControl1ChannelBand;
-    Bb::r32(bb::Control) = (Bb::r32(bb::Control) & ~(bb::kControlChannelMask | bb::kControlWhiteningOff))
-                         | (channel & bb::kControlChannelMask);
-}
-
-CH572_HIGH_CODE void set_phy_tx_mode(std::uint32_t tx_dma) noexcept
-{
-    RfEnd::r32(reg::PhyConfig) &= ~reg::kPhyConfigModeMask;
-
-    Bb::r32(bb::Control) &= ~bb::kControlPhyMask;
-    const std::uint32_t dma_word = read_u32(reinterpret_cast<const void*>(tx_dma));
-    Bb::r32(bb::Control3) &= ~bb::kControl3PhyMask;
-
-    const std::uint32_t wait   = Lle::r16(lle::WaitTime);
-    const std::uint32_t length = (dma_word >> kTxLengthShift) & kTxLengthMask;
-    const std::uint32_t total =
-        ((length + kTxLengthOverhead) * kTxByteTicks + (wait / kTxWaitDivisor + kTxFixedTicks)) * kLleTickScale;
-    start_lle_timer(total, lle::kIrqTimer0);
-}
-
-CH572_HIGH_CODE void set_phy_rx_mode(std::uint8_t rx_max_len) noexcept
-{
-    Bb::r32(bb::Control) &= ~bb::kControlPhyMask;
-    RfEnd::r32(reg::FilterControl) = (RfEnd::r32(reg::FilterControl) & ~reg::kFilterTuneMask)
-                                         | (rfend::tune_filter_2m() & reg::kFilterTuneMask);
-    Bb::r32(bb::Control3) &= ~bb::kControl3PhyMask;
-    Bb::r32(bb::Control1)    = (Bb::r32(bb::Control1) & ~bb::kRxControl1Mask) | kBbRxControl1Value;
-    Bb::r8(bb::Control2High) = kBbRxControl2High;
-    Bb::r32(bb::Control2)    = (Bb::r32(bb::Control2) & ~bb::kRxControl2Mask) | kBbRxControl2Value;
-    g_wait_recv_time = (static_cast<std::uint32_t>(rx_max_len) + kRxLengthOverhead) * kRxByteTicks + kRxFixedTicks;
+    return static_cast<std::uint8_t>((Bb::r32(bb::CrcStatus) >> bb::kCrcOkShift) & bb::kCrcOkMask);
 }
 
 CH572_HIGH_CODE void notify(Event event) noexcept
@@ -122,26 +119,88 @@ CH572_HIGH_CODE void notify(Event event) noexcept
 CH572_HIGH_CODE void stop_lle_timer() noexcept
 {
     Lle::r32(lle::Timer) = 0;
-    Lle::r32(lle::Irq)   = lle::kIrqTimer4;
+    Lle::r32(lle::Irq)   = kLleTimer0;
 }
 
-CH572_HIGH_CODE void rf_basic_process(std::uint32_t raw_irq) noexcept
+CH572_HIGH_CODE void start_lle_timer(std::uint32_t total) noexcept
+{
+    const std::uint32_t saved = Lle::r32(lle::Config2);
+    Lle::r32(lle::Config2)    = saved & ~kLleTimer0;
+    fence_i();
+    Lle::r32(lle::Irq)     = kLleTimer0;
+    Lle::r32(lle::Timer)   = total;
+    Lle::r32(lle::Config2) = saved;
+}
+
+// RFIP_SetChannel() for the low-frequency path used here: `kLinkFrequency` is
+// a channel index below 2.3 GHz, so the vendor driver writes it straight into
+// the BB control register and leaves the synthesizer divider registers alone.
+CH572_HIGH_CODE void program_channel() noexcept
+{
+    RfEnd::r32(reg::TxControl1) &= ~reg::kTxControl1ChannelBand;
+    Bb::r32(bb::Control)        = (Bb::r32(bb::Control) & ~kChannelMask)
+                           | (kLinkFrequency & kChannelMask);
+}
+
+// RFIP_SetPHYTxMode(): LLE countdown covering preamble plus payload.
+CH572_HIGH_CODE void set_phy_tx_mode(const Frame* frame) noexcept
+{
+    RfEnd::r32(reg::PhyConfig) = (RfEnd::r32(reg::PhyConfig) & ~reg::kPhyConfigModeMask)
+                               | (kProperties & reg::kPhyConfigModeMask);
+
+    Bb::r32(bb::Control) &= ~kControlPhyMask;
+    Bb::r32(bb::Control3) &= ~bb::kControl3PhyMask;
+
+    const std::uint32_t dma_word = *reinterpret_cast<const volatile std::uint32_t*>(frame);
+    const std::uint32_t length   = (dma_word >> 8) & 0xFFu;
+    const std::uint32_t wait     = Lle::r16(lle::WaitTime);
+    const std::uint32_t total    = ((length + kTxLengthOverhead) * kTxByteTicks + (wait / 2u + kTxFixedTicks)) * 2u;
+
+    start_lle_timer(total);
+}
+
+// RFIP_SetPHYRxMode(): filter/ADC code and LLE receive window.
+CH572_HIGH_CODE void set_phy_rx_mode(std::uint8_t rx_max_len) noexcept
+{
+    Bb::r32(bb::Control) &= ~kControlPhyMask;
+    RfEnd::r32(reg::FilterControl) = (RfEnd::r32(reg::FilterControl) & ~reg::kFilterTuneMask)
+                                   | (rfend::tune_filter_2m() & reg::kFilterTuneMask);
+    Bb::r32(bb::Control3) &= ~bb::kControl3PhyMask;
+
+    Bb::r32(bb::Control1)    = (Bb::r32(bb::Control1) & ~bb::kRxControl1Mask) | kBbRxControl1;
+    Bb::r8(bb::Control2High) = static_cast<std::uint8_t>(kBbRxControl2High);
+    Bb::r32(bb::Control2)    = (Bb::r32(bb::Control2) & ~bb::kRxControl2Mask) | kBbRxControl2;
+
+    g_wait_recv_time = (static_cast<std::uint32_t>(rx_max_len) + kRxLengthOverhead) * kRxByteTicks + kRxFixedTicks;
+}
+
+CH572_HIGH_CODE void rf_basic_process(std::uint32_t status) noexcept
 {
     // A TX-done event suppresses the timeout event in the same status word.
-    const bool tx_done = (raw_irq & lle::kIrqTxDone) != 0;
-    if (tx_done)
+    if ((status & (1u << 1)) != 0)
     {
         stop_lle_timer();
+        status &= ~kLleTimer0;
         notify(kEventTx);
     }
 
-    if ((raw_irq & lle::kIrqRx) != 0)
+    if ((status & 1u) != 0)
     {
         stop_lle_timer();
-        notify((read_crc() == 0) ? kEventRx : kEventEr);
+        if (read_crc() == 0)
+        {
+            if (g_rx_frame != nullptr)
+            {
+                std::memcpy(g_rx_frame, g_rx_dma, sizeof(Frame));
+            }
+            notify(kEventRx);
+        }
+        else
+        {
+            notify(kEventEr);
+        }
     }
-
-    if (!tx_done && (raw_irq & lle::kIrqTimer0) != 0)
+    else if ((status & kLleTimer0) != 0)
     {
         notify(kEventEr);
     }
@@ -158,10 +217,15 @@ void init(ProcessCallback process_cb) noexcept
 
     g_process_cb = process_cb;
 
+    // Enable the RF analog blocks (vendor RFRole_Init does this before any
+    // radio register access; without it the PA/LNA stay powered down).
+    {
+        sysreg::SafeAccess access;
+        sysreg::misc_ctrl() = (sysreg::misc_ctrl() & ~(0x3Fu << 24)) | (0xEu << 24);
+    }
+
     rfend::init();
-
     wakeup();
-
     calibration();
 
     enable_irq(Irq::BleBb);
@@ -175,34 +239,44 @@ void wakeup() noexcept
 {
     {
         sysreg::SafeAccess access;
-        sysreg::sleep_clk_off1() &= ~kSleepClkOffBle;
-        sysreg::sleep_clk_off2() &= ~kSleepClkOff2Mask;
+        sysreg::sleep_clk_off1() &= ~kBleClkGate1;
+        sysreg::sleep_clk_off2() &= ~kBleClkGate2;
     }
-    Lle::r32(lle::Config) |= lle::kConfigInit;
+
+    Lle::r32(lle::Config) |= kLleConfigInit;
     Lle::r32(lle::Config54) = 0;
-    Lle::r32(lle::Config2)  = lle::kConfig2Init;
-    Bb::r32(bb::CrcStatus)  = bb::kCrcStatusClear;
-    Bb::r32(bb::RxConfig)   = kBbRxConfigValue;
-    Bb::r32(bb::RxConfig2)  = kBbRxConfig2Value;
+    Lle::r32(lle::Config2)  = kLleConfig2Init;
+    Bb::r32(bb::CrcStatus)  = kBbCrcClear;
+    Bb::r32(bb::RxConfig)   = kBbRxConfig;
+    Bb::r32(bb::RxConfig2)  = kBbRxConfig2;
 }
 
 void calibration() noexcept
 {
-    Bb::r32(bb::Control) = (Bb::r32(bb::Control) & ~bb::kControlModeMask) | bb::kControlCalibrationMode;
-    RfEnd::r32(reg::Control2) |= reg::kControl2Calibration;
-    Lle::r32(lle::PhyControl) = kLlePhyCalibration;
+    Bb::r32(bb::Control) = (Bb::r32(bb::Control) & ~kControlModeMask) | kControlCalib;
+    RfEnd::r32(reg::Control2) |= kCalEnable;
+    RfEnd::r32(reg::TxBias) |= kTxBiasCal;
+    Lle::r32(lle::PhyControl) = kPhyCalibration;
+
+    for (volatile int loop = 0; loop < kPhySettleLoops; ++loop)
+    {
+    }
+
+    RfEnd::r32(reg::Control3) |= kControl3Cal;
+    RfEnd::r32(reg::Control3) &= ~kControl3Cal;
+    nop();
+    nop();
+    nop();
+    nop();
+    RfEnd::r32(reg::Control3) |= kControl3Cal;
+    RfEnd::r32(reg::TxBias) &= ~kTxBiasCal;
 
     rfend::calibration();
 
-    Lle::r32(lle::Irq)   = lle::kIrqTimer0;
-    Bb::r32(bb::Control) = (Bb::r32(bb::Control) & ~bb::kControlModeMask) | bb::kControlIdleMode;
-    RfEnd::r32(reg::Control2) &= reg::kControl2CalibrationClear;
-    Lle::r32(lle::PhyControl) = kLlePhyIdle;
-}
-
-std::uint8_t read_crc() noexcept
-{
-    return static_cast<std::uint8_t>((Bb::r32(bb::CrcStatus) >> bb::kCrcOkShift) & bb::kCrcOkMask);
+    Lle::r32(lle::Irq)   = kLleTimer0;
+    Bb::r32(bb::Control) = (Bb::r32(bb::Control) & ~kControlModeMask) | kControlIdle;
+    RfEnd::r32(reg::Control2) &= kCalClear;
+    Lle::r32(lle::PhyControl) = kPhyIdle;
 }
 
 } // namespace
@@ -214,19 +288,35 @@ void set_tx(Frame* frame) noexcept
         return;
     }
 
-    const std::uint32_t tx_dma = reinterpret_cast<std::uint32_t>(frame);
     Lle::r32(lle::Control) |= lle::kControlStop;
 
-    const std::uint8_t tx_power = static_cast<std::uint8_t>(kLinkTxPower | kBbTxPowerBoost);
-    Bb::r32(bb::TxPower)        = (Bb::r32(bb::TxPower) & ~bb::kTxPowerLevelMask)
+    const std::uint8_t tx_power = static_cast<std::uint8_t>(kLinkTxPower | 0x40u);
+    Bb::r32(bb::TxPower)        = (Bb::r32(bb::TxPower) & 0x7Fu)
                                 | (static_cast<std::uint32_t>(tx_power) << bb::kTxPowerLevelShift);
-    Lle::r16(lle::WaitTime)     = kLinkWaitTime;
-    Bb::r32(bb::TxPower)        = (Bb::r32(bb::TxPower) & ~bb::kTxPowerModeMask) | kBbTxPowerStartMode;
-    Bb::r32(bb::Control)        = (Bb::r32(bb::Control) & ~bb::kControlModeMask) | bb::kControlCalibrationMode;
-    RfEnd::r32(reg::Control2) |= reg::kControl2Calibration;
-    Lle::r32(lle::PhyControl) = kLlePhyTx;
+    Lle::r16(lle::WaitTime)     = static_cast<std::uint16_t>(kLinkWaitTime);
+    Bb::r32(bb::TxPower)        = (Bb::r32(bb::TxPower) & ~bb::kTxPowerModeMask) | 1u;
 
-    configure_channel(kLinkFrequency);
+    Bb::r32(bb::Control) = Bb::r32(bb::Control) & ~kControlModeMask;
+    Bb::r32(bb::Control) = (Bb::r32(bb::Control) & ~kControlModeMask) | kControlCalib;
+
+    RfEnd::r32(reg::Control2) |= kCalEnable;
+    RfEnd::r32(reg::TxBias) |= kTxBiasCal;
+    Lle::r32(lle::PhyControl) = kPhyTx;
+
+    for (volatile int loop = 0; loop < kPhySettleLoops; ++loop)
+    {
+    }
+
+    RfEnd::r32(reg::Control3) |= kControl3Cal;
+    RfEnd::r32(reg::Control3) &= ~kControl3Cal;
+    nop();
+    nop();
+    nop();
+    nop();
+    RfEnd::r32(reg::Control3) |= kControl3Cal;
+    RfEnd::r32(reg::TxBias) &= ~kTxBiasCal;
+
+    program_channel();
 
     if (Lle::r16(lle::WaitTime) > kTxFineTuneWait)
     {
@@ -241,10 +331,11 @@ void set_tx(Frame* frame) noexcept
     Bb::r32(bb::AccessAddress)   = kLinkAccessAddress;
     Bb::r32(bb::AccessAddressEx) = 0u;
     Bb::r32(bb::CrcInit)         = kLinkCrcInit;
-    Bb::r32(bb::CrcPoly)         = (Bb::r32(bb::CrcPoly) & bb::kCrcPolyHighMask) | (kLinkCrcPoly & bb::kCrcPolyLowMask);
-    Lle::r32(lle::TxDma)         = tx_dma;
+    Bb::r32(bb::CrcPoly) = (Bb::r32(bb::CrcPoly) & bb::kCrcPolyHighMask) | (kLinkCrcPoly & bb::kCrcPolyLowMask);
 
-    set_phy_tx_mode(tx_dma);
+    Lle::r32(lle::TxDma) = reinterpret_cast<std::uint32_t>(frame);
+
+    set_phy_tx_mode(frame);
 
     Bb::r32(bb::Control) |= bb::kControlStartTx;
     Bb::r32(bb::TxPower) &= ~bb::kTxPowerModeMask;
@@ -258,34 +349,52 @@ void set_rx(Frame* frame, std::uint32_t timeout) noexcept
         return;
     }
 
-    Lle::r16(lle::WaitTime) = kRxWaitTime;
+    g_rx_frame = frame;
+
+    Lle::r16(lle::WaitTime) = static_cast<std::uint16_t>(kRxWaitTime);
     if ((Lle::r32(lle::Control) & lle::kControlModeMask) != 0)
     {
         Lle::r32(lle::Control) |= lle::kControlStop;
     }
 
-    Bb::r32(bb::Control) = (Bb::r32(bb::Control) & ~bb::kControlModeMask) | bb::kControlCalibrationMode;
-    RfEnd::r32(reg::Control2) |= reg::kControl2Calibration;
-    Lle::r32(lle::PhyControl) = kLlePhyRx;
+    Bb::r32(bb::Control) = Bb::r32(bb::Control) & ~kControlModeMask;
+    Bb::r32(bb::Control) = (Bb::r32(bb::Control) & ~kControlModeMask) | kControlCalib;
 
-    configure_channel(kLinkFrequency);
+    RfEnd::r32(reg::Control2) |= kCalEnable;
+    RfEnd::r32(reg::TxBias) |= kTxBiasCal;
+    Lle::r32(lle::PhyControl) = kPhyRx;
+
+    for (volatile int loop = 0; loop < kPhySettleLoops; ++loop)
+    {
+    }
+
+    RfEnd::r32(reg::Control3) |= kControl3Cal;
+    RfEnd::r32(reg::Control3) &= ~kControl3Cal;
+    nop();
+    nop();
+    nop();
+    nop();
+    RfEnd::r32(reg::Control3) |= kControl3Cal;
+    RfEnd::r32(reg::TxBias) &= ~kTxBiasCal;
+
+    program_channel();
 
     Bb::r32(bb::RxAccessAddress)   = kLinkAccessAddress;
     Bb::r32(bb::RxAccessAddressEx) = 0u;
     Bb::r32(bb::RxCrcInit)         = kLinkCrcInit;
     Bb::r32(bb::RxCrcPoly) = (Bb::r32(bb::RxCrcPoly) & bb::kCrcPolyHighMask) | (kLinkCrcPoly & bb::kCrcPolyLowMask);
 
-    Lle::r32(lle::Timeout) = timeout;
-    Lle::r32(lle::Timer)   = 0;
-    Lle::r32(lle::Irq)     = lle::kIrqTimer4;
+    Lle::r32(lle::RxDma) = reinterpret_cast<std::uint32_t>(g_rx_dma);
+    Lle::r32(lle::Timer) = 0;
+    Lle::r32(lle::Irq)   = kLleTimer0;
 
     set_phy_rx_mode(kMaxPacket);
 
     Lle::r32(lle::Control) = lle::kControlRx;
 
-    if (timeout != 0)
+    if (timeout != 0u)
     {
-        start_lle_timer(timeout, lle::kIrqTimer4);
+        start_lle_timer(timeout);
     }
 }
 
@@ -304,11 +413,10 @@ void lle_irq_handler() noexcept
 
 void bb_irq_handler() noexcept
 {
-    const std::uint32_t control = Bb::r32(bb::Control);
-    if ((control & kBbReceiveDone) != 0)
+    if ((Bb::r32(bb::CrcStatus) & (1u << 6)) != 0)
     {
-        Bb::r32(bb::CrcStatus) = bb::kCrcStatusRxAck;
-        Lle::r32(lle::Irq)     = lle::kIrqTimer4;
+        Bb::r32(bb::CrcStatus) = 0x60u;
+        Lle::r32(lle::Irq)     = kLleTimer0;
         Lle::r32(lle::Timer)   = g_wait_recv_time;
     }
 }

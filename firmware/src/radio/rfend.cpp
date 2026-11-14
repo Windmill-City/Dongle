@@ -16,7 +16,6 @@ namespace lle                               = radio_reg::lle;
 constexpr std::uint32_t kTimerTicksPerUs    = 2;
 constexpr std::uint32_t kFilterTimeoutTicks = 50 * kTimerTicksPerUs;
 constexpr std::uint32_t kTuneTimeoutTicks   = 4000u * kTimerTicksPerUs;
-constexpr std::uint32_t kInitSettleTicks    = 3 * kTimerTicksPerUs;
 
 // Vendor tuning points: 2401, 2480 and 2440 MHz.
 constexpr std::uint16_t kTuneCycle2401      = 191;
@@ -39,19 +38,22 @@ std::int32_t divide(std::int32_t numerator, std::int32_t denominator) noexcept
 
 void init() noexcept
 {
-    RfEnd::r32(off::TxBias)        = 1152;
-    RfEnd::r32(off::Power)         = (RfEnd::r32(off::Power) & 0xF8FFFFFFu) | 0x20000000u;
-    RfEnd::r32(off::Power)         = (RfEnd::r32(off::Power) & 0x1FFFFFFFu) | 0x00040000u;
-    RfEnd::r32(off::TxControl2)    = RfEnd::r32(off::TxControl2) & 0xFFF9FFFFu;
-    RfEnd::r32(off::TxControl2)    = (RfEnd::r32(off::TxControl2) & 0x8FFFFFFFu) | 0x00040000u;
+    // Mirrors the vendor RFEND_DevInit() bit by bit.
+    RfEnd::r32(off::TxBias) = 1152;
+    RfEnd::r32(off::Power)  = (RfEnd::r32(off::Power) & 0xFFFF0FFFu) | 0x00008000u;
+    RfEnd::r32(off::TxControl1) = (RfEnd::r32(off::TxControl1) & 0xFFFFCFFFu) | 0x00001000u;
+    RfEnd::r32(off::TxControl1) = (RfEnd::r32(off::TxControl1) & 0xFFFCFFFFu) | 0x00010000u;
+    RfEnd::r32(off::Power)  = (RfEnd::r32(off::Power) & 0xF8FFFFFFu) | 0x20000000u;
+    RfEnd::r32(off::Power)  = (RfEnd::r32(off::Power) & 0x1FFFFFFFu) | 0x40000000u;
+    RfEnd::r32(off::TxControl2) = RfEnd::r32(off::TxControl2) & 0xFFF9FFFFu;
+    RfEnd::r32(off::TxControl2) = (RfEnd::r32(off::TxControl2) & 0x8FFFFFFFu) | 0x40000000u;
     RfEnd::r32(off::TuneControl)   = RfEnd::r32(off::TuneControl) & 0xFFF8FFFFu;
     RfEnd::r32(off::FilterControl) = (RfEnd::r32(off::FilterControl) & ~0x700u) | 0x300u;
     RfEnd::r32(off::RxControl) |= 0x00070000u;
     RfEnd::r32(off::RxControl) |= 0x07000000u;
-    RfEnd::r32(off::TxBias) |= 0x00000800u;
+    RfEnd::r32(off::TxBias) |= 0x00007800u;
 
-    Lle::r32(lle::Timer) = kInitSettleTicks;
-    while (Lle::r32(lle::Timer) != 0)
+    for (volatile int loop = 0; loop < 100; ++loop)
     {
     }
 }

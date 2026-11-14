@@ -40,20 +40,24 @@ void UsbDevice::endpoint_init()
 {
     usbreg::ctrl()      = 0;
 
-    // EP1 is the CDC ACM notification endpoint and EP2 is the CDC data pair.
+    // EP1 is the CDC ACM notification endpoint, EP2 receives the CDC data and
+    // EP3 sends it. Separating the data endpoints gives TX and RX their own
+    // 64-byte buffers instead of sharing the EP2 buffer pair.
     usbreg::ep4_1_mod() = usbreg::kUep1TxEn;
-    usbreg::ep2_3_mod() = usbreg::kUep2RxEn | usbreg::kUep2TxEn;
+    usbreg::ep2_3_mod() = usbreg::kUep2RxEn | usbreg::kUep3TxEn;
 
     usbreg::ep0_dma()   = static_cast<std::uint16_t>(reinterpret_cast<std::uintptr_t>(&m_ep0_buffer[0]));
     usbreg::ep1_dma()   = static_cast<std::uint16_t>(reinterpret_cast<std::uintptr_t>(&m_ep1_buffer[0]));
     usbreg::ep2_dma()   = static_cast<std::uint16_t>(reinterpret_cast<std::uintptr_t>(&m_ep2_buffer[0]));
+    usbreg::ep3_dma()   = static_cast<std::uint16_t>(reinterpret_cast<std::uintptr_t>(&m_ep3_buffer[0]));
 
     // EP0 must receive (ACK) so the host's first SETUP (GET_DESCRIPTOR) is
     // accepted. With RX=NAK the packet is rejected and enumeration never
     // starts.
     usbreg::ep0_ctrl()  = usbreg::kUepRResAck | usbreg::kUepTResNak;
     usbreg::ep1_ctrl()  = usbreg::kUepRResAck | usbreg::kUepTResNak;
-    usbreg::ep2_ctrl()  = usbreg::kUepRResAck | usbreg::kUepTResNak;
+    usbreg::ep2_ctrl()  = usbreg::kUepRResAck | usbreg::kUepTResNak | usbreg::kUepAutoTog;
+    usbreg::ep3_ctrl()  = usbreg::kUepRResNak | usbreg::kUepTResNak | usbreg::kUepAutoTog;
 
     usbreg::dev_addr()  = 0;
     usbreg::dev_ctrl()  = usbreg::kUdPdDis;
@@ -147,6 +151,12 @@ void UsbDevice::handle_setup()
 
         case kReqSetConfiguration:
             m_device_info.config = setup->value_l;
+            usbreg::ep1_ctrl()   = usbreg::kUepRResAck | usbreg::kUepTResNak;
+            usbreg::ep2_ctrl()   = usbreg::kUepRResAck | usbreg::kUepTResNak | usbreg::kUepAutoTog;
+            usbreg::ep3_ctrl()   = usbreg::kUepRResNak | usbreg::kUepTResNak | usbreg::kUepAutoTog;
+            usbreg::ep1_t_len()  = 0;
+            usbreg::ep2_t_len()  = 0;
+            usbreg::ep3_t_len()  = 0;
             break;
 
         case kReqClearFeature:
@@ -156,14 +166,16 @@ void UsbDevice::handle_setup()
                     (usbreg::ep1_ctrl() & ~(usbreg::kUepTTog | usbreg::kMaskUepTRes)) | usbreg::kUepTResNak;
                 usbreg::ep2_ctrl() =
                     (usbreg::ep2_ctrl() & ~(usbreg::kUepTTog | usbreg::kMaskUepTRes)) | usbreg::kUepTResNak;
+                usbreg::ep3_ctrl() =
+                    (usbreg::ep3_ctrl() & ~(usbreg::kUepTTog | usbreg::kMaskUepTRes)) | usbreg::kUepTResNak;
             }
             else if ((setup->request_type & kRecipientMask) == kRecipientEndpoint)
             {
                 switch (setup->index_l)
                 {
-                case 0x82:
-                    usbreg::ep2_ctrl() =
-                        (usbreg::ep2_ctrl() & ~(usbreg::kUepTTog | usbreg::kMaskUepTRes)) | usbreg::kUepTResNak;
+                case 0x83:
+                    usbreg::ep3_ctrl() =
+                        (usbreg::ep3_ctrl() & ~(usbreg::kUepTTog | usbreg::kMaskUepTRes)) | usbreg::kUepTResNak;
                     break;
                 case 0x02:
                     usbreg::ep2_ctrl() =
@@ -228,9 +240,11 @@ void UsbDevice::handle_setup()
     }
 
     const bool data_in  = (length <= kEp0Size);
+    const bool out_data = (data_direction == 0 && m_setup_length != 0);
     usbreg::ep0_t_len() = data_in ? length : 0;
     const std::uint8_t rx_response =
-        (data_in && m_setup_request != kReqGetDescriptor) ? usbreg::kUepRResNak : usbreg::kUepRResAck;
+        out_data ? usbreg::kUepRResAck
+                 : ((data_in && m_setup_request != kReqGetDescriptor) ? usbreg::kUepRResNak : usbreg::kUepRResAck);
     usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog | rx_response | usbreg::kUepTResAck;
 }
 
@@ -249,7 +263,6 @@ void UsbDevice::irq_handler()
             case kTokenOut | 2:
                 if (toggle_ok)
                 {
-                    usbreg::ep2_ctrl() ^= usbreg::kUepRTog;
                     m_rx_buffer.write(m_ep2_buffer, length);
 
                     if (m_rx_buffer.size() > (kUsbBufferSize - kPacketSize))
@@ -259,9 +272,8 @@ void UsbDevice::irq_handler()
                 }
                 break;
 
-            case kTokenIn | 2:
-                usbreg::ep2_ctrl() ^= usbreg::kUepTTog;
-                usbreg::ep2_ctrl() = (usbreg::ep2_ctrl() & ~usbreg::kMaskUepTRes) | kInNak;
+            case kTokenIn | 3:
+                usbreg::ep3_ctrl() = (usbreg::ep3_ctrl() & ~usbreg::kMaskUepTRes) | kInNak;
                 break;
 
             case kTokenIn | 1:
@@ -319,7 +331,8 @@ void UsbDevice::irq_handler()
         // never starts.
         usbreg::ep0_ctrl()    = usbreg::kUepRResAck | usbreg::kUepTResNak;
         usbreg::ep1_ctrl()    = usbreg::kUepRResAck | usbreg::kUepTResNak;
-        usbreg::ep2_ctrl()    = usbreg::kUepRResAck | usbreg::kUepTResNak;
+        usbreg::ep2_ctrl()    = usbreg::kUepRResAck | usbreg::kUepTResNak | usbreg::kUepAutoTog;
+        usbreg::ep3_ctrl()    = usbreg::kUepRResNak | usbreg::kUepTResNak | usbreg::kUepAutoTog;
         usbreg::dev_addr()    = 0;
         m_device_info.address = 0;
         usbreg::int_fg()      = usbreg::kUifBusReset;
@@ -380,16 +393,15 @@ void UsbDevice::poll()
         return;
     }
 
-    if ((usbreg::ep2_ctrl() & usbreg::kMaskUepTRes) == usbreg::kUepTResNak)
+    if ((usbreg::ep3_ctrl() & usbreg::kMaskUepTRes) == usbreg::kUepTResNak)
     {
         if (m_source != nullptr)
         {
-            std::uint8_t      length    = static_cast<std::uint8_t>(kPacketSize);
-            const std::size_t available = m_source->read(&m_ep2_buffer[kPacketSize], length);
+            const std::size_t available = m_source->read(m_ep3_buffer, sizeof(m_ep3_buffer));
             if (available != 0)
             {
-                usbreg::ep2_t_len() = static_cast<std::uint8_t>(available);
-                usbreg::ep2_ctrl()  = (usbreg::ep2_ctrl() & ~usbreg::kMaskUepTRes) | usbreg::kUepTResAck;
+                usbreg::ep3_t_len() = static_cast<std::uint8_t>(available);
+                usbreg::ep3_ctrl()  = (usbreg::ep3_ctrl() & ~usbreg::kMaskUepTRes) | usbreg::kUepTResAck;
             }
         }
     }

@@ -69,12 +69,38 @@ void RfUart::poll() noexcept
         {
             serial::write(buffer, length);
         }
+
+        // Recover from a missed TX-done so a lost interrupt cannot wedge the
+        // response path.
+        if (m_tx_in_flight && systick::expired(m_tx_deadline))
+        {
+            CriticalSection guard;
+            m_tx_in_flight = false;
+            start_rx();
+        }
+
+        // Answer a received request from the main loop, not from the RX
+        // interrupt, and hold off briefly so the master has already re-armed
+        // RX by the time this response is transmitted.
+        if (m_tx_pending && !m_tx_in_flight && systick::expired(m_tx_after))
+        {
+            CriticalSection guard;
+            m_tx_pending = false;
+            start_tx();
+        }
         return;
     }
 
     // poll() runs in the main loop while the radio state is also touched by the
     // RF interrupt, so make the check-and-start indivisible.
     CriticalSection guard;
+
+    if (m_tx_in_flight && systick::expired(m_tx_deadline))
+    {
+        // TX-done was lost (CRC abort, missed interrupt). Resume the normal
+        // state machine instead of waiting forever.
+        m_tx_in_flight = false;
+    }
 
     if (m_waiting)
     {
@@ -157,6 +183,7 @@ void RfUart::on_status(rf::Event event) noexcept
 void RfUart::start_tx() noexcept
 {
     m_tx_in_flight = true;
+    m_tx_deadline  = systick::now() + kTxWatchdogTicks;
     rf::set_tx(&m_tx);
 }
 
@@ -212,12 +239,13 @@ void RfUart::process_slave_req(rf::Packet* packet) noexcept
         }
 
         const std::size_t length = read_local(m_usb, m_role, m_tx.payload, rf::kMaxPayload);
-        out.command              = packet->command;
-        out.sequence             = packet->sequence;
-        out.length               = static_cast<std::uint8_t>(length);
+            out.command = packet->command;
+        out.sequence = packet->sequence;
+        out.length   = static_cast<std::uint8_t>(length);
     }
 
-    start_tx();
+    m_tx_after   = systick::now() + kSlaveResponseDelayTicks;
+    m_tx_pending = true;
 }
 
 void RfUart::process_tx() noexcept

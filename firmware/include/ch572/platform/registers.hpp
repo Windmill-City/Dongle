@@ -1980,12 +1980,12 @@ inline constexpr std::size_t   PhyControl       = 0x50;
 inline constexpr std::size_t   Config54         = 0x54;
 inline constexpr std::size_t   Timer            = 0x64;
 inline constexpr std::size_t   TxDma            = 0x78;
-inline constexpr std::size_t   Timeout          = 0x7C;
+inline constexpr std::size_t   RxDma            = 0x7C;
 
 // Raw interrupt bits. The hardware names come from the five LLE timers; the
 // radio driver uses timer 0 as the RX timeout and timer 4 as the generic timer.
 inline constexpr std::uint32_t kIrqRx           = 1u << 0;
-inline constexpr std::uint32_t kIrqTxDone       = 1u << 2;
+inline constexpr std::uint32_t kIrqTxDone       = 1u << 1;
 inline constexpr std::uint32_t kIrqTimer0       = 1u << 17;
 inline constexpr std::uint32_t kIrqTimer1       = 1u << 18;
 inline constexpr std::uint32_t kIrqTimer2       = 1u << 19;

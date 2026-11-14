@@ -62,7 +62,8 @@ class UsbDevice
 
     alignas(4) std::uint8_t m_ep0_buffer[kEp0Size]{};
     alignas(4) std::uint8_t m_ep1_buffer[8]{};
-    alignas(4) std::uint8_t m_ep2_buffer[2 * kPacketSize]{};
+    alignas(4) std::uint8_t m_ep2_buffer[kPacketSize]{};
+    alignas(4) std::uint8_t m_ep3_buffer[kPacketSize]{};
 
     RingBuffer<kUsbBufferSize> m_rx_buffer;
     rf_uart::RfUart*           m_source = nullptr;
