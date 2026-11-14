@@ -98,10 +98,20 @@ void UsbDevice::handle_setup()
         {
             const std::uint8_t  type              = setup->value_h;
             const std::uint8_t* descriptor        = find_descriptor(kDescriptors, type);
-            std::uint8_t        descriptor_length = 0;
+            std::uint16_t       descriptor_length = 0;
             if (descriptor != nullptr)
             {
                 descriptor_length = descriptor[0];
+                if (type == kDescriptorConfig && descriptor[0] >= 4)
+                {
+                    // For a configuration descriptor bLength is only the 9-byte
+                    // header; the full size is wTotalLength.
+                    descriptor_length = static_cast<std::uint16_t>(descriptor[2] | (descriptor[3] << 8));
+                }
+                if (descriptor_length > 255)
+                {
+                    descriptor_length = 255;
+                }
             }
 
             if (descriptor == nullptr)
@@ -111,7 +121,7 @@ void UsbDevice::handle_setup()
             }
 
             m_descriptor = descriptor;
-            length       = descriptor_length;
+            length       = static_cast<std::uint8_t>(descriptor_length);
             if (m_setup_length > length)
             {
                 m_setup_length = length;
