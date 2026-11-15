@@ -164,7 +164,7 @@ CH572_HIGH_CODE void rf_basic_process(std::uint32_t status) noexcept
 {
     // Only TX-done can arrive while the radio is transmitting: the countdown
     // interrupt is masked (start_lle_timer) and no reception can complete.
-    if ((status & lle::kIrqTxDone) != 0)
+    if ((status & lle::kIrqTx) != 0)
     {
         stop_lle_timer();
         Lle::r32(lle::Config2) |= lle::kIrqTimer0;
@@ -278,7 +278,7 @@ void set_tx(Frame* frame) noexcept
 
     Lle::r32(lle::Control) |= lle::kControlStop;
 
-    Lle::r32(lle::Irq)     = lle::kIrqRx | lle::kIrqTxDone | lle::kIrqTimer0;
+    Lle::r32(lle::Irq)     = lle::kIrqRx | lle::kIrqTx | lle::kIrqTimer0;
     Bb::r32(bb::CrcStatus) = bb::kCrcStatusClear;
 
     const std::uint8_t tx_power =

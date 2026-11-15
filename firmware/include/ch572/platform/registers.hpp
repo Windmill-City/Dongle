@@ -530,7 +530,7 @@ inline volatile std::uint32_t& misc_ctrl() noexcept
 inline constexpr std::uint32_t kRfAnalogMask   = 0x3Fu << 24;
 inline constexpr std::uint32_t kRfAnalogEnable = 0x0Eu << 24;
 
-inline volatile std::uint8_t& pll_config() noexcept
+inline volatile std::uint8_t&  pll_config() noexcept
 {
     return mmio::ref<std::uint8_t>(0x4000104Bu);
 }
@@ -1989,7 +1989,7 @@ inline constexpr std::size_t   RxDma            = 0x7C;
 // Raw interrupt bits. The hardware names come from the five LLE timers; the
 // radio driver uses timer 0 as the RX timeout and timer 4 as the generic timer.
 inline constexpr std::uint32_t kIrqRx           = 1u << 0;
-inline constexpr std::uint32_t kIrqTxDone       = 1u << 1;
+inline constexpr std::uint32_t kIrqTx           = 1u << 1;
 inline constexpr std::uint32_t kIrqTimer0       = 1u << 17;
 inline constexpr std::uint32_t kIrqTimer1       = 1u << 18;
 inline constexpr std::uint32_t kIrqTimer2       = 1u << 19;
