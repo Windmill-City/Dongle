@@ -29,7 +29,7 @@ namespace lle = radio_reg::lle;
 namespace bb  = radio_reg::bb;
 namespace reg = radio_reg::rfend;
 
-ProcessCallback g_process_cb = nullptr;
+ProcessCallback g_callback = nullptr;
 
 // The hardware writes one frame plus trailing CRC/status bytes into this
 // buffer; the usable part is copied into the caller's frame on RX.
@@ -168,7 +168,7 @@ CH572_HIGH_CODE void rf_basic_process(std::uint32_t status) noexcept
     {
         stop_lle_timer();
         Lle::r32(lle::Config2) |= lle::kIrqTimer0;
-        g_process_cb(kEventTx);
+        g_callback(kEventTx);
         return;
     }
 
@@ -181,7 +181,7 @@ CH572_HIGH_CODE void rf_basic_process(std::uint32_t status) noexcept
             {
                 std::memcpy(g_rx_frame, g_rx_dma, sizeof(Frame));
             }
-            g_process_cb(kEventRx);
+            g_callback(kEventRx);
         }
         else
         {
@@ -203,7 +203,7 @@ void init(ProcessCallback process_cb) noexcept
         return;
     }
 
-    g_process_cb = process_cb;
+    g_callback = process_cb;
 
     // Enable the RF analog blocks (vendor RFRole_Init does this before any
     // radio register access; without it the PA/LNA stay powered down).
