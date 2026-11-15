@@ -50,11 +50,7 @@ class RfUart final
     serial::LineCoding coding() const noexcept;
 
   private:
-    CH572_HIGH_CODE static void on_status(rf::Event event) noexcept;
-
-    CH572_HIGH_CODE void        process_tx() noexcept;
-    CH572_HIGH_CODE void        start_tx() noexcept;
-    CH572_HIGH_CODE void        start_rx() noexcept;
+    CH572_HIGH_CODE static void on_rf_evt(rf::Event event) noexcept;
 
     CH572_HIGH_CODE void        master_process_response(rf::Packet* packet) noexcept;
     void                        master_build_request() noexcept;
@@ -80,11 +76,6 @@ class RfUart final
     // Master: deadline for the ACK of the outstanding request. When it passes,
     // the cached request is retransmitted unchanged.
     volatile std::uint32_t      m_ack_deadline = 0;
-
-    // A frame is on the air; set on transmit and cleared by the TX-done
-    // interrupt. The error path must not re-arm the receiver while it is set,
-    // otherwise a stray RX timeout can abort the frame being transmitted.
-    volatile bool               m_tx_in_flight = false;
 
     // Sequence of the outstanding (master) or last accepted (slave) request.
     // One variable serves both roles, since a device is only ever one of them.

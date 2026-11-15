@@ -526,6 +526,10 @@ inline volatile std::uint32_t& misc_ctrl() noexcept
     return mmio::ref<std::uint32_t>(0x40001048u);
 }
 
+// RF analog block enable field in misc_ctrl (bits 29:24).
+inline constexpr std::uint32_t kRfAnalogMask   = 0x3Fu << 24;
+inline constexpr std::uint32_t kRfAnalogEnable = 0x0Eu << 24;
+
 inline volatile std::uint8_t& pll_config() noexcept
 {
     return mmio::ref<std::uint8_t>(0x4000104Bu);
@@ -2026,6 +2030,7 @@ inline constexpr std::uint32_t kControlChannelMask     = 0x3Fu;
 inline constexpr std::uint32_t kControlWhiteningOff    = 1u << 6;
 inline constexpr std::uint32_t kControlPhyMask         = 0x3u << 8;
 inline constexpr std::uint32_t kControlModeMask        = 0x3u << 16;
+inline constexpr std::uint32_t kControlCalibMode       = 2u << 16;
 inline constexpr std::uint32_t kControlCalibrationMode = 1u << 21;
 inline constexpr std::uint32_t kControlIdleMode        = 1u << 16;
 inline constexpr std::uint32_t kControlStartTx         = 1u << 28;
@@ -2034,11 +2039,15 @@ inline constexpr std::uint32_t kControl3PhyMask        = 0x3u << 25;
 // TX power register fields.
 inline constexpr std::uint32_t kTxPowerLevelMask       = 0x7Fu << 25;
 inline constexpr std::uint32_t kTxPowerLevelShift      = 25;
+inline constexpr std::uint32_t kTxPowerLowFieldMask    = 0x7Fu;
+inline constexpr std::uint32_t kTxPowerLevelFlag       = 0x40u;
 inline constexpr std::uint32_t kTxPowerModeMask        = 0x3u;
+inline constexpr std::uint32_t kTxPowerModeCalibration = 1u;
 
 // CRC status fields.
 inline constexpr std::uint32_t kCrcStatusClear         = 0xFFFFu;
 inline constexpr std::uint32_t kCrcStatusRxAck         = 0x60u;
+inline constexpr std::uint32_t kCrcStatusDone          = 1u << 6;
 inline constexpr std::uint32_t kCrcOkShift             = 5;
 inline constexpr std::uint32_t kCrcOkMask              = 1u;
 inline constexpr std::uint32_t kCrcPolyHighMask        = 0xFF000000u;

@@ -13,9 +13,8 @@ using ProcessCallback                             = void (*)(Event event);
 
 // Events reported to the role callback. These are deliberately independent
 // from the raw LLE IRQ bits, which are decoded inside rfip.cpp.
-inline constexpr Event         kEventEr           = 1u << 0;
-inline constexpr Event         kEventTx           = 1u << 1;
-inline constexpr Event         kEventRx           = 1u << 2;
+inline constexpr Event         kEventTx           = 1u << 0;
+inline constexpr Event         kEventRx           = 1u << 1;
 
 inline constexpr std::uint8_t  kTxPowerMinus25Dbm = 0x01;
 inline constexpr std::uint8_t  kTxPowerMinus20Dbm = 0x02;
@@ -72,8 +71,9 @@ static_assert(sizeof(Frame) >= sizeof(Packet) + kMaxPayload, "RF frame holds hea
 static_assert(sizeof(Frame) % 4 == 0, "RF frame keeps the DMA base aligned");
 
 void                 init(ProcessCallback process_cb) noexcept;
+
 CH572_HIGH_CODE void set_tx(Frame* frame) noexcept;
-CH572_HIGH_CODE void set_rx(Frame* frame, std::uint32_t timeout) noexcept;
+CH572_HIGH_CODE void set_rx(Frame* frame) noexcept;
 
 CH572_HIGH_CODE void lle_irq_handler() noexcept;
 CH572_HIGH_CODE void bb_irq_handler() noexcept;

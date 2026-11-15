@@ -45,7 +45,7 @@ void RfUart::init() noexcept
 {
     g_instance = this;
 
-    rf::init(&RfUart::on_status);
+    rf::init(&RfUart::on_rf_evt);
 
     if (m_role == Role::master)
     {
@@ -56,7 +56,7 @@ void RfUart::init() noexcept
         // The slave powers up in reset state: it must not move serial data
         // until the host has sent a Reset carrying the LineCoding.
         serial::suspend();
-        start_rx();
+        rf::set_rx(&m_rx);
     }
 }
 
@@ -102,7 +102,7 @@ void RfUart::poll() noexcept
                 return;
             }
 
-            start_tx();
+            rf::set_tx(&m_tx);
             m_ack_deadline = systick::now() + kAckTimeoutTicks;
             return;
         }
@@ -114,7 +114,7 @@ void RfUart::poll() noexcept
 
         master_build_request();
         m_turn_pending = true;
-        start_tx();
+        rf::set_tx(&m_tx);
         m_ack_deadline = systick::now() + kAckTimeoutTicks;
         return;
     }
@@ -145,11 +145,11 @@ void RfUart::poll() noexcept
             slave_apply_line_coding();
         }
         m_turn_pending = false;
-        start_tx();
+        rf::set_tx(&m_tx);
     }
 }
 
-void RfUart::on_status(rf::Event event) noexcept
+void RfUart::on_rf_evt(rf::Event event) noexcept
 {
     if (g_instance == nullptr)
     {
@@ -157,13 +157,9 @@ void RfUart::on_status(rf::Event event) noexcept
     }
 
     auto* self = g_instance;
-    if ((event & rf::kEventEr) != 0 && !self->m_tx_in_flight)
-    {
-        self->start_rx();
-    }
     if ((event & rf::kEventTx) != 0)
     {
-        self->process_tx();
+        rf::set_rx(&self->m_rx);
     }
     if ((event & rf::kEventRx) != 0)
     {
@@ -176,19 +172,6 @@ void RfUart::on_status(rf::Event event) noexcept
             self->slave_process_request(&self->m_rx.packet);
         }
     }
-}
-
-void RfUart::start_tx() noexcept
-{
-    m_tx_in_flight = true;
-    rf::set_tx(&m_tx);
-}
-
-void RfUart::start_rx() noexcept
-{
-    // Listen until a frame arrives or the next TX stops the receiver. The
-    // hardware window is left unlimited; the peer paces its own turns.
-    rf::set_rx(&m_rx, 0);
 }
 
 void RfUart::master_build_request() noexcept
@@ -223,13 +206,13 @@ void RfUart::master_process_response(rf::Packet* packet) noexcept
     // the request is still outstanding.
     if (!m_turn_pending || packet->sequence != m_seq)
     {
-        start_rx();
+        rf::set_rx(&m_rx);
         return;
     }
 
     if (packet->length > rf::kMaxPayload)
     {
-        start_rx();
+        rf::set_rx(&m_rx);
         return;
     }
 
@@ -248,7 +231,7 @@ void RfUart::master_process_response(rf::Packet* packet) noexcept
 
     if (packet->command != m_tx.packet.command)
     {
-        start_rx();
+        rf::set_rx(&m_rx);
         return;
     }
 
@@ -357,12 +340,6 @@ void RfUart::slave_apply_line_coding() noexcept
 
     serial::configure(coding);
     serial::resume();
-}
-
-void RfUart::process_tx() noexcept
-{
-    m_tx_in_flight = false;
-    start_rx();
 }
 
 std::size_t RfUart::read(std::uint8_t* dst, std::size_t max_length) noexcept
