@@ -74,7 +74,6 @@ class RfUart final
     // so the slave has re-armed its receiver after the previous ACK. Slave:
     // delays the ACK so the master has re-armed its receiver before it starts.
     volatile std::uint32_t      m_tx_after     = 0;
-    volatile bool               m_tx_in_flight = false;
 
     // Sequence of the outstanding (master) or last accepted (slave) request.
     // One variable serves both roles, since a device is only ever one of them.

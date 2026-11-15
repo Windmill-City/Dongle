@@ -145,7 +145,7 @@ void RfUart::on_status(rf::Event event) noexcept
     {
         self->start_rx();
     }
-    if ((event & rf::kEventTx) != 0 && self->m_tx_in_flight)
+    if ((event & rf::kEventTx) != 0)
     {
         self->process_tx();
     }
@@ -164,14 +164,6 @@ void RfUart::on_status(rf::Event event) noexcept
 
 void RfUart::start_tx() noexcept
 {
-    // Never queue a second frame while one is on the air: a duplicate request
-    // would arrive at the slave after it already moved on.
-    if (m_tx_in_flight)
-    {
-        return;
-    }
-
-    m_tx_in_flight = true;
     rf::set_tx(&m_tx);
 }
 
@@ -352,7 +344,6 @@ void RfUart::slave_apply_line_coding() noexcept
 
 void RfUart::process_tx() noexcept
 {
-    m_tx_in_flight = false;
     start_rx();
 }
 
