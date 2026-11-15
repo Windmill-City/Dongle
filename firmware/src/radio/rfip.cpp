@@ -107,19 +107,6 @@ CH572_HIGH_CODE void stop_lle_timer() noexcept
     Lle::r32(lle::Irq)   = lle::kIrqTimer0;
 }
 
-// Starts the LLE transmit countdown. The counter still times the transmission,
-// but its expiry interrupt is left masked for the whole frame: nothing consumes
-// that event while TX owns the radio, and keeping it masked is what keeps the
-// RX paths of rf_basic_process() unreachable during TX. The TX-done branch
-// hands the timer back to the RX watchdog.
-CH572_HIGH_CODE void start_lle_timer(std::uint32_t total) noexcept
-{
-    Lle::r32(lle::Config2) &= ~lle::kIrqTimer0;
-    fence_i();
-    Lle::r32(lle::Irq)   = lle::kIrqTimer0;
-    Lle::r32(lle::Timer) = total;
-}
-
 // RFIP_SetChannel() for the low-frequency path used here: `kLinkFrequency` is
 // a channel index below 2.3 GHz, so the vendor driver writes it straight into
 // the BB control register and leaves the synthesizer divider registers alone.
@@ -143,7 +130,9 @@ CH572_HIGH_CODE void set_phy_tx_mode(const Frame* frame) noexcept
     const std::uint32_t wait     = Lle::r16(lle::WaitTime);
     const std::uint32_t total    = ((length + kTxLengthOverhead) * kTxByteTicks + (wait / 2u + kTxFixedTicks)) * 2u;
 
-    start_lle_timer(total);
+    Lle::r32(lle::Config2) &= ~lle::kIrqTimer0;
+    Lle::r32(lle::Irq)   = lle::kIrqTimer0;
+    Lle::r32(lle::Timer) = total;
 }
 
 // RFIP_SetPHYRxMode(): filter/ADC code for the fixed 2 Mbps receive mode.
@@ -162,7 +151,7 @@ CH572_HIGH_CODE void set_phy_rx_mode() noexcept
 CH572_HIGH_CODE void rf_basic_process(std::uint32_t status) noexcept
 {
     // Only TX-done can arrive while the radio is transmitting: the countdown
-    // interrupt is masked (start_lle_timer) and no reception can complete.
+    // interrupt is masked (set_phy_tx_mode) and no reception can complete.
     if ((status & lle::kIrqTx) != 0)
     {
         stop_lle_timer();
