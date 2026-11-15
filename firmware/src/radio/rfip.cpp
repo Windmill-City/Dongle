@@ -177,10 +177,7 @@ CH572_HIGH_CODE void rf_basic_process(std::uint32_t status) noexcept
         stop_lle_timer();
         if (read_crc() == 0)
         {
-            if (g_rx_frame != nullptr)
-            {
-                std::memcpy(g_rx_frame, g_rx_dma, sizeof(Frame));
-            }
+            std::memcpy(g_rx_frame, g_rx_dma, sizeof(Frame));
             g_callback(kEventRx);
         }
         else
