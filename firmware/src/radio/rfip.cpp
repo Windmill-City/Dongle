@@ -388,15 +388,15 @@ void set_rx(Frame* frame) noexcept
 
 void lle_irq_handler() noexcept
 {
-    const std::uint32_t status = Lle::r32(lle::Irq);
-    const std::uint32_t enable = Lle::r32(lle::Config2);
-    if ((status & enable) == 0)
+    const std::uint32_t irq = Lle::r32(lle::Irq);
+    const std::uint32_t mask = Lle::r32(lle::Config2);
+    if ((irq & mask) == 0)
     {
         return;
     }
 
-    Lle::r32(lle::Irq) = status;
-    rf_basic_process(status & enable);
+    Lle::r32(lle::Irq) = irq;
+    rf_basic_process(irq & mask);
 }
 
 void bb_irq_handler() noexcept
