@@ -22,10 +22,12 @@ enum class Role : std::uint8_t
 };
 
 inline constexpr std::uint32_t kPollIntervalMs          = 6;
-inline constexpr std::uint32_t kSlaveResponseDelayMs    = 2;
+inline constexpr std::uint32_t kSlaveResponseDelayMs    = 1;
+inline constexpr std::uint32_t kAckTimeoutMs            = 4;
 
 inline constexpr std::uint32_t kPollIntervalTicks       = kPollIntervalMs * clock::kTicksPerMs;
 inline constexpr std::uint32_t kSlaveResponseDelayTicks = kSlaveResponseDelayMs * clock::kTicksPerMs;
+inline constexpr std::uint32_t kAckTimeoutTicks         = kAckTimeoutMs * clock::kTicksPerMs;
 
 inline constexpr std::uint8_t  kCommandReset            = 0;
 inline constexpr std::uint8_t  kCommandData             = 1;
@@ -74,6 +76,15 @@ class RfUart final
     // so the slave has re-armed its receiver after the previous ACK. Slave:
     // delays the ACK so the master has re-armed its receiver before it starts.
     volatile std::uint32_t      m_tx_after     = 0;
+
+    // Master: deadline for the ACK of the outstanding request. When it passes,
+    // the cached request is retransmitted unchanged.
+    volatile std::uint32_t      m_ack_deadline = 0;
+
+    // A frame is on the air; set on transmit and cleared by the TX-done
+    // interrupt. The error path must not re-arm the receiver while it is set,
+    // otherwise a stray RX timeout can abort the frame being transmitted.
+    volatile bool               m_tx_in_flight = false;
 
     // Sequence of the outstanding (master) or last accepted (slave) request.
     // One variable serves both roles, since a device is only ever one of them.

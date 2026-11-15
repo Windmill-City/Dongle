@@ -91,8 +91,23 @@ void RfUart::poll() noexcept
         // the RF interrupt, so make the check-and-start indivisible.
         CriticalSection guard;
 
-        // A request stays outstanding until its ACK arrives.
-        if (m_turn_pending || !systick::expired(m_tx_after))
+        // A request stays outstanding until its ACK arrives. The peer can miss
+        // the first transmission while its receiver settles, so retransmit the
+        // held frame unchanged; the slave answers a duplicate sequence by
+        // replaying the ACK it already sent rather than consuming data twice.
+        if (m_turn_pending)
+        {
+            if (!systick::expired(m_ack_deadline))
+            {
+                return;
+            }
+
+            start_tx();
+            m_ack_deadline = systick::now() + kAckTimeoutTicks;
+            return;
+        }
+
+        if (!systick::expired(m_tx_after))
         {
             return;
         }
@@ -100,6 +115,7 @@ void RfUart::poll() noexcept
         master_build_request();
         m_turn_pending = true;
         start_tx();
+        m_ack_deadline = systick::now() + kAckTimeoutTicks;
         return;
     }
 
@@ -141,7 +157,7 @@ void RfUart::on_status(rf::Event event) noexcept
     }
 
     auto* self = g_instance;
-    if ((event & rf::kEventEr) != 0)
+    if ((event & rf::kEventEr) != 0 && !self->m_tx_in_flight)
     {
         self->start_rx();
     }
@@ -164,6 +180,7 @@ void RfUart::on_status(rf::Event event) noexcept
 
 void RfUart::start_tx() noexcept
 {
+    m_tx_in_flight = true;
     rf::set_tx(&m_tx);
 }
 
@@ -344,6 +361,7 @@ void RfUart::slave_apply_line_coding() noexcept
 
 void RfUart::process_tx() noexcept
 {
+    m_tx_in_flight = false;
     start_rx();
 }
 
