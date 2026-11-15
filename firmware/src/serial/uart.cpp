@@ -161,28 +161,13 @@ void resume() noexcept
 
 CH572_HIGH_CODE std::size_t read(std::uint8_t* dst, std::size_t max_length) noexcept
 {
-    if (!enabled())
-    {
-        return 0;
-    }
-
     return g_rx_buffer.read(dst, max_length);
 }
 
 void write(const std::uint8_t* src, std::size_t length) noexcept
 {
-    if (src == nullptr || !enabled())
-    {
-        return;
-    }
-
     for (std::size_t index = 0; index < length; ++index)
     {
-        if (!enabled())
-        {
-            return;
-        }
-
         while (uart::tfc() >= kTxFifoDepth)
         {
         }
