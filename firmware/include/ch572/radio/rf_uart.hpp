@@ -7,93 +7,95 @@
 #include "ch572/platform/clock.hpp"
 #include "ch572/radio/rfip.hpp"
 #include "ch572/serial/line_coding.hpp"
-#include "ch572/usb/usb_device.hpp"
+#include "ch572/serial/uart.hpp"
 #include "ch572/util/ring_buffer.hpp"
 
 namespace ch572::rf_uart
 {
 
-inline constexpr std::size_t kRfBufferSize = 1024;
+inline constexpr std::size_t kRfBufferSize = 2048;
 
-// The link has one master and one slave. The master polls with a REQ and the
-// slave answers with one RSP; the REQ payload carries the master's local data
-// and the RSP payload carries the slave's local data, so every poll moves both
-// directions. The header's four-bit sub-command also lets a REQ carry control
-// data instead of payload (see kCommand*).
 enum class Role : std::uint8_t
 {
     master,
     slave,
 };
 
-inline constexpr std::uint32_t kPollIntervalMs       = 6;
-inline constexpr std::uint32_t kResponseTimeoutMs    = 5;
-inline constexpr std::uint32_t kSlaveResponseDelayMs = 1;
-inline constexpr std::uint32_t kTxWatchdogMs         = 15;
-inline constexpr std::uint32_t kSequenceMask         = 0x0Fu;
+inline constexpr std::uint32_t kPollIntervalMs          = 6;
+inline constexpr std::uint32_t kSlaveResponseDelayMs    = 2;
 
-inline constexpr std::uint32_t kPollIntervalTicks    = kPollIntervalMs * clock::kTicksPerMs;
-inline constexpr std::uint32_t kResponseTimeoutTicks = kResponseTimeoutMs * clock::kTicksPerMs;
+inline constexpr std::uint32_t kPollIntervalTicks       = kPollIntervalMs * clock::kTicksPerMs;
 inline constexpr std::uint32_t kSlaveResponseDelayTicks = kSlaveResponseDelayMs * clock::kTicksPerMs;
-inline constexpr std::uint32_t kTxWatchdogTicks      = kTxWatchdogMs * clock::kTicksPerMs;
 
-inline constexpr std::uint8_t  kCommandData          = 0;
-inline constexpr std::uint8_t  kCommandLineCoding    = 1;
+inline constexpr std::uint8_t  kCommandReset            = 0;
+inline constexpr std::uint8_t  kCommandData             = 1;
 
 class RfUart final
 {
   public:
-    RfUart(usb::UsbDevice& usb, Role role) noexcept
-        : m_usb(usb)
-        , m_role(role)
+    explicit RfUart(Role role) noexcept
+        : m_role(role)
     {
     }
 
-    void        init() noexcept;
-    void        poll() noexcept;
-    std::size_t read(std::uint8_t* dst, std::size_t max_length) noexcept;
+    void               init() noexcept;
+    void               poll() noexcept;
+    std::size_t        read(std::uint8_t* dst, std::size_t max_length) noexcept;
+    void               set_coding(const serial::LineCoding& coding) noexcept;
 
-    // Called by the USB device when the host changes the CDC line settings.
-    // The next request carries them to the slave before any payload.
-    void        set_line_coding(const serial::LineCoding& coding) noexcept;
+    void               attach(serial::HostInput host) noexcept;
+    serial::HostOutput output() noexcept;
+    serial::LineCoding coding() const noexcept;
 
   private:
     CH572_HIGH_CODE static void on_status(rf::Event event) noexcept;
 
-    CH572_HIGH_CODE void        process_master_rsp(rf::Packet* packet) noexcept;
-    CH572_HIGH_CODE void        process_slave_req(rf::Packet* packet) noexcept;
     CH572_HIGH_CODE void        process_tx() noexcept;
     CH572_HIGH_CODE void        start_tx() noexcept;
     CH572_HIGH_CODE void        start_rx() noexcept;
 
-    usb::UsbDevice&             m_usb;
+    CH572_HIGH_CODE void        master_process_response(rf::Packet* packet) noexcept;
+    void                        master_build_request() noexcept;
+
+    CH572_HIGH_CODE void        slave_process_request(rf::Packet* packet) noexcept;
+    CH572_HIGH_CODE void        slave_schedule_reply() noexcept;
+    void                        slave_apply_line_coding() noexcept;
+
+    serial::HostInput           m_host;
     RingBuffer<kRfBufferSize>   m_rf_buffer;
 
     rf::Frame                   m_tx;
     rf::Frame                   m_rx;
 
     Role                        m_role;
-    volatile std::uint32_t      m_deadline     = 0;
-    volatile std::uint8_t       m_seq          = 0;
 
-    // Master: a request is outstanding, the slave owes a response.
-    volatile bool               m_waiting      = false;
+    // Earliest time the next frame may be started. One variable serves both
+    // roles, since a device is only ever one of them. Master: paces requests
+    // so the slave has re-armed its receiver after the previous ACK. Slave:
+    // delays the ACK so the master has re-armed its receiver before it starts.
+    volatile std::uint32_t      m_tx_after     = 0;
     volatile bool               m_tx_in_flight = false;
 
-    // Slave: a response is queued. It is sent from poll() after a short delay
-    // rather than from the RX interrupt, so the master has time to re-arm its
-    // receiver before the response hits the air and the two sides can never
-    // transmit in lockstep.
-    volatile bool               m_tx_pending   = false;
-    volatile std::uint32_t      m_tx_after     = 0;
+    // Sequence of the outstanding (master) or last accepted (slave) request.
+    // One variable serves both roles, since a device is only ever one of them.
+    // The master toggles it after an ACK; the slave compares it while active
+    // to detect a retransmission and replay the ACK held in m_tx.
+    volatile bool               m_seq          = false;
 
-    // Guards against a lost TX-done interrupt wedging the state machine.
-    volatile std::uint32_t      m_tx_deadline  = 0;
+    // A radio turn is outstanding. One variable serves both roles: the master
+    // sets it when it sends a request and clears it on the ACK, which keeps a
+    // second request off the air; the slave sets it when a reply is queued and
+    // clears it in poll() just before transmitting that ACK.
+    volatile bool               m_turn_pending = false;
 
-    // Master: the latest host line coding and whether it still has to reach
-    // the slave. Written from the USB interrupt, consumed in poll().
-    serial::LineCoding          m_line_coding{115200u, serial::kStopBits1, serial::kParityNone, 8};
-    volatile bool               m_line_coding_pending = false;
+    // Line coding shared by both roles. Master: the latest host setting, sent
+    // in the next Reset while m_coding_pending; written from the USB interrupt
+    // and consumed in poll(). Slave: the coding received in the last Reset,
+    // applied by poll() right before its ACK. A pending slave is inactive: no
+    // serial bytes move and a data request is answered with Reset. It stays
+    // pending from power-on until a Reset carries a coding.
+    serial::LineCoding          m_coding{115200u, serial::kStopBits1, serial::kParityNone, 8};
+    volatile bool               m_coding_pending = true;
 };
 
 } // namespace ch572::rf_uart

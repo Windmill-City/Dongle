@@ -7,17 +7,36 @@
 
 namespace ch572::rf_uart
 {
+
 namespace
 {
 
 RfUart*         g_instance = nullptr;
 
-// The master's local side is the USB CDC port; the slave's is the UART that
-// shares the USB-A pads.
-CH572_HIGH_CODE std::size_t
-                read_local(usb::UsbDevice& usb, Role role, std::uint8_t* dst, std::size_t max_length) noexcept
+// The radio buffer is written from the radio interrupt and read from the USB
+// interrupt or the main loop, so a read must not be split by a write: the ring
+// rejects a payload outright when its free-space check looks full.
+std::size_t read_radio_buffer(RingBuffer<kRfBufferSize>& ring, std::uint8_t* dst, std::size_t max_length) noexcept
 {
-    return role == Role::master ? usb.read_host(dst, max_length) : serial::read(dst, max_length);
+    CriticalSection guard;
+    return ring.read(dst, max_length);
+}
+
+// Adapters for serial::HostOutput. Keeping them here means the USB device sees
+// only the interface header, not this class.
+std::size_t output_read(void* context, void* dst, std::size_t max_length) noexcept
+{
+    return static_cast<RfUart*>(context)->read(static_cast<std::uint8_t*>(dst), max_length);
+}
+
+void output_set_line_coding(void* context, const serial::LineCoding& coding) noexcept
+{
+    static_cast<RfUart*>(context)->set_coding(coding);
+}
+
+serial::LineCoding output_coding(void* context) noexcept
+{
+    return static_cast<RfUart*>(context)->coding();
 }
 
 } // namespace
@@ -28,127 +47,90 @@ void RfUart::init() noexcept
 
     rf::init(&RfUart::on_status);
 
-    m_waiting = false;
-
     if (m_role == Role::master)
     {
-        m_seq                 = 0;
-        m_deadline            = systick::now();
-
-        // Prime the slave with the host's line coding on the first exchange.
-        m_line_coding_pending = true;
+        m_tx_after = systick::now();
     }
     else
     {
-        // The slave treats 0xFF as "no request seen yet".
-        m_seq = 0xFF;
+        // The slave powers up in reset state: it must not move serial data
+        // until the host has sent a Reset carrying the LineCoding.
+        serial::suspend();
         start_rx();
     }
 }
 
-void RfUart::set_line_coding(const serial::LineCoding& coding) noexcept
+void RfUart::attach(serial::HostInput host) noexcept
 {
-    if (m_role != Role::master)
-    {
-        return;
-    }
+    m_host = host;
+}
 
-    m_line_coding         = coding;
-    m_line_coding_pending = true;
+serial::HostOutput RfUart::output() noexcept
+{
+    return serial::HostOutput{this, &output_read, &output_set_line_coding, &output_coding};
+}
+
+void RfUart::set_coding(const serial::LineCoding& coding) noexcept
+{
+    CriticalSection guard;
+    m_coding         = coding;
+    m_coding_pending = true;
+}
+
+serial::LineCoding RfUart::coding() const noexcept
+{
+    CriticalSection guard;
+    return m_coding;
 }
 
 void RfUart::poll() noexcept
 {
-    if (m_role != Role::master)
+    if (m_role != Role::slave)
     {
-        // Forward radio payloads to the local serial port; the UART interrupt
-        // buffers the other direction.
-        std::uint8_t buffer[rf::kMaxPayload];
-        std::size_t  length = 0;
-        while ((length = m_rf_buffer.read(buffer, sizeof(buffer))) != 0)
-        {
-            serial::write(buffer, length);
-        }
+        // poll() runs in the main loop while the radio state is also touched by
+        // the RF interrupt, so make the check-and-start indivisible.
+        CriticalSection guard;
 
-        // Recover from a missed TX-done so a lost interrupt cannot wedge the
-        // response path.
-        if (m_tx_in_flight && systick::expired(m_tx_deadline))
-        {
-            CriticalSection guard;
-            m_tx_in_flight = false;
-            start_rx();
-        }
-
-        // Answer a received request from the main loop, not from the RX
-        // interrupt, and hold off briefly so the master has already re-armed
-        // RX by the time this response is transmitted.
-        if (m_tx_pending && !m_tx_in_flight && systick::expired(m_tx_after))
-        {
-            CriticalSection guard;
-            m_tx_pending = false;
-            start_tx();
-        }
-        return;
-    }
-
-    // poll() runs in the main loop while the radio state is also touched by the
-    // RF interrupt, so make the check-and-start indivisible.
-    CriticalSection guard;
-
-    if (m_tx_in_flight && systick::expired(m_tx_deadline))
-    {
-        // TX-done was lost (CRC abort, missed interrupt). Resume the normal
-        // state machine instead of waiting forever.
-        m_tx_in_flight = false;
-    }
-
-    if (m_waiting)
-    {
-        // Wait for TX-done before judging the response deadline; the request
-        // must not be aborted while it is still on the air.
-        if (m_tx_in_flight || !systick::expired(m_deadline))
+        // A request stays outstanding until its ACK arrives.
+        if (m_turn_pending || !systick::expired(m_tx_after))
         {
             return;
         }
 
-        // No response in time: retransmit the cached request. The sequence is
-        // kept, so a slave that already answered only replays its response.
-        m_deadline = systick::now() + kResponseTimeoutTicks;
+        master_build_request();
+        m_turn_pending = true;
         start_tx();
         return;
     }
 
-    if (!systick::expired(m_deadline))
+    // Drain the host->slave ring before a pending line coding is applied.
+    // While inactive the bytes are discarded, so nothing received before a
+    // Reset can reach the UART after it has been configured.
+    std::uint8_t buffer[rf::kMaxPayload];
+    std::size_t  length = 0;
+    while ((length = read_radio_buffer(m_rf_buffer, buffer, sizeof(buffer))) != 0)
     {
-        return;
+        if (!m_coding_pending)
+        {
+            serial::write(buffer, length);
+        }
     }
 
-    auto& out = m_tx.packet;
-
-    if (m_line_coding_pending)
+    // Answer a received request from the main loop rather than the RX
+    // interrupt, and hold off briefly so the master has already re-armed RX by
+    // the time this ACK is transmitted. A coding is applied right before its
+    // ACK, so nothing moves under the old setting; a pending state left by
+    // power-on has no request behind it and keeps the slave inactive.
+    if (m_turn_pending && systick::expired(m_tx_after))
     {
-        // A line-coding request replaces one data poll. It is sent with the
-        // current sequence, so the normal retry path keeps repeating it until
-        // the slave answers.
-        std::memcpy(m_tx.payload, &m_line_coding, sizeof(serial::LineCoding));
-        m_line_coding_pending = false;
-
-        out.command           = kCommandLineCoding;
-        out.sequence          = m_seq;
-        out.length            = static_cast<std::uint8_t>(sizeof(serial::LineCoding));
+        CriticalSection guard;
+        if (m_coding_pending)
+        {
+            slave_apply_line_coding();
+        }
+        m_turn_pending = false;
+        start_tx();
     }
-    else
-    {
-        const std::size_t length = read_local(m_usb, m_role, m_tx.payload, rf::kMaxPayload);
-
-        out.command              = kCommandData;
-        out.sequence             = m_seq;
-        out.length               = static_cast<std::uint8_t>(length);
-    }
-
-    m_waiting  = true;
-    m_deadline = systick::now() + kResponseTimeoutTicks;
-    start_tx();
 }
 
 void RfUart::on_status(rf::Event event) noexcept
@@ -159,11 +141,11 @@ void RfUart::on_status(rf::Event event) noexcept
     }
 
     auto* self = g_instance;
-    if ((event & rf::kEventEr) != 0 && !self->m_tx_in_flight)
+    if ((event & rf::kEventEr) != 0)
     {
         self->start_rx();
     }
-    if ((event & rf::kEventTx) != 0)
+    if ((event & rf::kEventTx) != 0 && self->m_tx_in_flight)
     {
         self->process_tx();
     }
@@ -171,96 +153,212 @@ void RfUart::on_status(rf::Event event) noexcept
     {
         if (self->m_role == Role::master)
         {
-            self->process_master_rsp(&self->m_rx.packet);
+            self->master_process_response(&self->m_rx.packet);
         }
         else
         {
-            self->process_slave_req(&self->m_rx.packet);
+            self->slave_process_request(&self->m_rx.packet);
         }
     }
 }
 
 void RfUart::start_tx() noexcept
 {
+    // Never queue a second frame while one is on the air: a duplicate request
+    // would arrive at the slave after it already moved on.
+    if (m_tx_in_flight)
+    {
+        return;
+    }
+
     m_tx_in_flight = true;
-    m_tx_deadline  = systick::now() + kTxWatchdogTicks;
     rf::set_tx(&m_tx);
 }
 
 void RfUart::start_rx() noexcept
 {
     // Listen until a frame arrives or the next TX stops the receiver. The
-    // software deadline handles master retries, so no hardware window is used.
+    // hardware window is left unlimited; the peer paces its own turns.
     rf::set_rx(&m_rx, 0);
 }
 
-void RfUart::process_master_rsp(rf::Packet* packet) noexcept
+void RfUart::master_build_request() noexcept
 {
-    // Only the response to the outstanding request is useful. Anything else is
-    // a stale frame, so keep listening until the deadline.
-    if (!m_waiting || packet->sequence != m_seq)
+    auto& out    = m_tx.packet;
+    out.sequence = m_seq;
+
+    if (m_coding_pending)
     {
-        if (!m_tx_in_flight)
-        {
-            start_rx();
-        }
+        // Reset carries the host's LineCoding, so a line coding change is sent
+        // as another Reset. The slave reconfigures its UART and resumes only
+        // after acknowledging it.
+        std::memcpy(m_tx.payload, &m_coding, sizeof(serial::LineCoding));
+        m_coding_pending = false;
+
+        out.command = kCommandReset;
+        out.length  = static_cast<std::uint8_t>(sizeof(serial::LineCoding));
         return;
     }
 
-    if (packet->length != 0 && packet->length <= rf::kMaxPayload)
-    {
-        m_rf_buffer.write(packet + 1, packet->length);
-    }
+    const std::size_t length =
+        m_host.read != nullptr ? m_host.read(m_host.context, m_tx.payload, rf::kMaxPayload) : 0;
 
-    m_waiting  = false;
-    m_seq      = static_cast<std::uint8_t>((m_seq + 1u) & kSequenceMask);
-    m_deadline = systick::now() + kPollIntervalTicks;
+    out.command = kCommandData;
+    out.length  = static_cast<std::uint8_t>(length);
 }
 
-void RfUart::process_slave_req(rf::Packet* packet) noexcept
+void RfUart::master_process_response(rf::Packet* packet) noexcept
 {
-    auto& out = m_tx.packet;
-    if (packet->sequence != m_seq)
+    // Only a response with the outstanding sequence is useful. A duplicate
+    // carries an older sequence and is dropped; the receiver is re-armed while
+    // the request is still outstanding.
+    if (!m_turn_pending || packet->sequence != m_seq)
     {
-        m_seq = packet->sequence;
-
-        if (packet->command == kCommandLineCoding)
-        {
-            if (static_cast<std::size_t>(packet->length) == sizeof(serial::LineCoding))
-            {
-                serial::LineCoding coding;
-                std::memcpy(&coding, packet + 1, sizeof(coding));
-                serial::configure(coding);
-            }
-        }
-        else if (packet->length != 0 && packet->length <= rf::kMaxPayload)
-        {
-            m_rf_buffer.write(packet + 1, packet->length);
-        }
-
-        const std::size_t length = read_local(m_usb, m_role, m_tx.payload, rf::kMaxPayload);
-            out.command = packet->command;
-        out.sequence = packet->sequence;
-        out.length   = static_cast<std::uint8_t>(length);
+        start_rx();
+        return;
     }
 
-    m_tx_after   = systick::now() + kSlaveResponseDelayTicks;
-    m_tx_pending = true;
+    if (packet->length > rf::kMaxPayload)
+    {
+        start_rx();
+        return;
+    }
+
+    if (packet->command == kCommandReset && m_tx.packet.command != kCommandReset)
+    {
+        // The slave has no applied LineCoding and answered a data request with
+        // Reset, so the next request must carry the coding. This re-sends the
+        // coding the master already knows, bringing the slave back up without
+        // a host-side action.
+        m_turn_pending   = false;
+        m_seq            = !m_seq;
+        m_coding_pending = true;
+        m_tx_after       = systick::now() + kPollIntervalTicks;
+        return;
+    }
+
+    if (packet->command != m_tx.packet.command)
+    {
+        start_rx();
+        return;
+    }
+
+    if (m_tx.packet.command == kCommandData && packet->length != 0)
+    {
+        // The ring is filled here (radio interrupt) and drained by the USB
+        // interrupt; its free-space check must not straddle both contexts.
+        CriticalSection guard;
+        (void)m_rf_buffer.write(packet + 1, packet->length);
+    }
+
+    m_turn_pending = false;
+    m_seq          = !m_seq;
+
+    m_tx_after = systick::now() + kPollIntervalTicks;
+}
+
+void RfUart::slave_process_request(rf::Packet* packet) noexcept
+{
+    const std::uint8_t command  = packet->command;
+    const bool         sequence = packet->sequence;
+    const std::uint8_t length   = packet->length;
+
+    if (command == kCommandReset)
+    {
+        // Reset is idempotent and is honoured even when its sequence repeats,
+        // so a host that restarted can always recover an already running
+        // slave. It carries the host's LineCoding; a malformed payload still
+        // resets the slave, which then re-applies the coding it already holds.
+        m_coding_pending = true;
+        serial::suspend();
+
+        if (static_cast<std::size_t>(length) == sizeof(serial::LineCoding))
+        {
+            std::memcpy(&m_coding, packet + 1, sizeof(m_coding));
+        }
+
+        m_seq = sequence;
+
+        m_tx.packet.command  = kCommandReset;
+        m_tx.packet.sequence = sequence;
+        m_tx.packet.length   = 0;
+        slave_schedule_reply();
+        return;
+    }
+
+    if (!m_coding_pending && sequence == m_seq)
+    {
+        // Rule 6: a duplicate request replays the ACK still held in m_tx
+        // without consuming serial data.
+        slave_schedule_reply();
+        return;
+    }
+
+    // Rule 7: a new sequence consumes exactly one frame in each direction.
+    // While inactive there is no valid last sequence, so each request is new
+    // and is answered with Reset below.
+    m_seq = sequence;
+
+    m_tx.packet.command  = command;
+    m_tx.packet.sequence = sequence;
+    m_tx.packet.length   = 0;
+
+    if (command == kCommandData)
+    {
+        if (m_coding_pending)
+        {
+            // The slave was reset and still has no applied LineCoding: answer
+            // with Reset so the master knows to send the one carrying it.
+            m_tx.packet.command = kCommandReset;
+        }
+        else
+        {
+            if (length != 0)
+            {
+                CriticalSection guard;
+                (void)m_rf_buffer.write(packet + 1, length);
+            }
+
+            const std::size_t reply_length = serial::read(m_tx.payload, rf::kMaxPayload);
+            m_tx.packet.length             = static_cast<std::uint8_t>(reply_length);
+        }
+    }
+
+    slave_schedule_reply();
+}
+
+CH572_HIGH_CODE void RfUart::slave_schedule_reply() noexcept
+{
+    m_tx_after     = systick::now() + kSlaveResponseDelayTicks;
+    m_turn_pending = true;
+}
+
+void RfUart::slave_apply_line_coding() noexcept
+{
+    // A Reset must not interleave between clearing the pending coding and
+    // configuring the UART, otherwise its new coding could be overwritten.
+    CriticalSection guard;
+    if (!m_coding_pending)
+    {
+        return;
+    }
+
+    const serial::LineCoding coding = m_coding;
+    m_coding_pending                = false;
+
+    serial::configure(coding);
+    serial::resume();
 }
 
 void RfUart::process_tx() noexcept
 {
     m_tx_in_flight = false;
-    if (m_role == Role::master && m_waiting)
-    {
-        m_deadline = systick::now() + kResponseTimeoutTicks;
-    }
     start_rx();
 }
 
 std::size_t RfUart::read(std::uint8_t* dst, std::size_t max_length) noexcept
 {
-    return m_rf_buffer.read(dst, max_length);
+    return read_radio_buffer(m_rf_buffer, dst, max_length);
 }
 
 } // namespace ch572::rf_uart

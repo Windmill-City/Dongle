@@ -4,7 +4,7 @@
 
 #include "ch572/compiler.hpp"
 #include "ch572/platform/registers.hpp"
-#include "ch572/radio/rf_uart.hpp"
+#include "ch572/serial/line_coding.hpp"
 #include "ch572/usb/descriptors.hpp"
 #include "ch572/usb/usb_common.hpp"
 
@@ -14,24 +14,32 @@ namespace
 {
 
 // CDC ACM class requests.
-constexpr std::uint8_t kCdcSetLineCoding = 0x20;
-constexpr std::uint8_t kCdcGetLineCoding = 0x21;
+constexpr std::uint8_t kCdcSetLineCoding  = 0x20;
+constexpr std::uint8_t kCdcGetLineCoding  = 0x21;
 
-constexpr std::uint8_t kStall            = 0xFF;
-constexpr std::uint8_t kTokenOut         = 0x00;
-constexpr std::uint8_t kTokenIn          = 0x20;
-constexpr std::uint8_t kToggleOk         = 0x40;
+constexpr std::uint8_t kStall             = 0xFF;
+constexpr std::uint8_t kTokenEndpointMask = usbreg::kMaskUisToken | usbreg::kMaskUisEndpoint;
+
+// The interrupt entry point is a plain C function with no context argument, so
+// init() publishes the device the same way the radio bridge publishes its
+// instance.
+UsbDevice*             g_device           = nullptr;
+
+// Used until a source supplies its own coding, so the CDC interface still
+// answers enumeration and can be exercised without a bridge attached.
+constexpr serial::LineCoding kDefaultCoding{115200u, serial::kStopBits1, serial::kParityNone, 8};
+
+std::size_t            read_host_thunk(void* context, void* dst, std::size_t max_length) noexcept
+{
+    return static_cast<UsbDevice*>(context)->read_host(dst, max_length);
+}
 
 } // namespace
 
-UsbDevice& UsbDevice::instance()
-{
-    static UsbDevice device;
-    return device;
-}
-
 void UsbDevice::init()
 {
+    g_device = this;
+
     sysreg::pin_alternate() &= ~sysreg::kPinDebugEnable;
     endpoint_init();
 }
@@ -55,7 +63,7 @@ void UsbDevice::endpoint_init()
     // accepted. With RX=NAK the packet is rejected and enumeration never
     // starts.
     usbreg::ep0_ctrl()  = usbreg::kUepRResAck | usbreg::kUepTResNak;
-    usbreg::ep1_ctrl()  = usbreg::kUepRResAck | usbreg::kUepTResNak;
+    usbreg::ep1_ctrl()  = usbreg::kUepRResAck | usbreg::kUepTResNak | usbreg::kUepAutoTog;
     usbreg::ep2_ctrl()  = usbreg::kUepRResAck | usbreg::kUepTResNak | usbreg::kUepAutoTog;
     usbreg::ep3_ctrl()  = usbreg::kUepRResNak | usbreg::kUepTResNak | usbreg::kUepAutoTog;
 
@@ -151,7 +159,7 @@ void UsbDevice::handle_setup()
 
         case kReqSetConfiguration:
             m_device_info.config = setup->value_l;
-            usbreg::ep1_ctrl()   = usbreg::kUepRResAck | usbreg::kUepTResNak;
+            usbreg::ep1_ctrl()   = usbreg::kUepRResAck | usbreg::kUepTResNak | usbreg::kUepAutoTog;
             usbreg::ep2_ctrl()   = usbreg::kUepRResAck | usbreg::kUepTResNak | usbreg::kUepAutoTog;
             usbreg::ep3_ctrl()   = usbreg::kUepRResNak | usbreg::kUepTResNak | usbreg::kUepAutoTog;
             usbreg::ep1_t_len()  = 0;
@@ -219,8 +227,13 @@ void UsbDevice::handle_setup()
     {
         if (data_direction != 0 && m_setup_request == kCdcGetLineCoding)
         {
+            serial::LineCoding coding = kDefaultCoding;
+            if (m_source.coding != nullptr)
+            {
+                coding = m_source.coding(m_source.context);
+            }
             length = static_cast<std::uint8_t>(kCdcLineCodingSize);
-            std::memcpy(m_ep0_buffer, &m_line_coding, kCdcLineCodingSize);
+            std::memcpy(m_ep0_buffer, &coding, kCdcLineCodingSize);
         }
         else
         {
@@ -254,14 +267,46 @@ void UsbDevice::irq_handler()
     {
         if ((usbreg::int_st() & usbreg::kMaskUisToken) != usbreg::kMaskUisToken)
         {
-            const std::uint8_t pid       = usbreg::int_st();
-            const std::uint8_t length    = usbreg::rx_len();
-            const bool         toggle_ok = (usbreg::int_fg() & kToggleOk) != 0;
+            const std::uint8_t pid      = usbreg::int_st();
+            const std::uint8_t length   = usbreg::rx_len();
+            const std::uint8_t flags    = usbreg::int_fg();
+            const bool         accepted = (flags & usbreg::kUifToggleOk) != 0 && (flags & usbreg::kUifNak) == 0;
 
-            switch (pid & 0x3Fu)
+            switch (pid & kTokenEndpointMask)
             {
-            case kTokenOut | 2:
-                if (toggle_ok)
+            case usbreg::kUisTokenIn | 0:
+                handle_ep0_in();
+                break;
+
+            case usbreg::kUisTokenIn | 1:
+                usbreg::ep1_ctrl() = (usbreg::ep1_ctrl() & ~usbreg::kMaskUepTRes) | usbreg::kUepTResNak;
+                break;
+
+            case usbreg::kUisTokenIn | 3:
+                service_in();
+                break;
+
+            case usbreg::kUisTokenOut | 0:
+                if (accepted)
+                {
+                    if (m_setup_type == kRequestTypeClass && m_setup_request == kCdcSetLineCoding
+                        && static_cast<std::size_t>(length) == sizeof(serial::LineCoding))
+                    {
+                        serial::LineCoding coding;
+                        std::memcpy(&coding, m_ep0_buffer, sizeof(coding));
+                        if (m_source.set_coding != nullptr)
+                        {
+                            m_source.set_coding(m_source.context, coding);
+                        }
+                    }
+
+                    usbreg::ep0_ctrl() =
+                        usbreg::kUepRTog | usbreg::kUepTTog | usbreg::kUepRResNak | usbreg::kUepTResAck;
+                }
+                break;
+
+            case usbreg::kUisTokenOut | 2:
+                if (accepted)
                 {
                     m_rx_buffer.write(m_ep2_buffer, length);
 
@@ -270,42 +315,6 @@ void UsbDevice::irq_handler()
                         usbreg::ep2_ctrl() = (usbreg::ep2_ctrl() & ~usbreg::kMaskUepRRes) | usbreg::kUepRResNak;
                     }
                 }
-                break;
-
-            case kTokenIn | 3:
-                usbreg::ep3_ctrl() = (usbreg::ep3_ctrl() & ~usbreg::kMaskUepTRes) | kInNak;
-                break;
-
-            case kTokenIn | 1:
-                usbreg::ep1_ctrl() ^= usbreg::kUepTTog;
-                usbreg::ep1_ctrl() = (usbreg::ep1_ctrl() & 0xFCu) | kInNak;
-                break;
-
-            case kTokenOut | 0:
-                // SET_LINE_CODING carries its seven bytes in the OUT data
-                // stage, so take them once EP0 has received the packet. The
-                // SIE reports the packet even while the data stage is NAKed,
-                // so do not gate this on the toggle bit.
-                if (m_setup_type == kRequestTypeClass && m_setup_request == kCdcSetLineCoding
-                    && static_cast<std::size_t>(length) == sizeof(serial::LineCoding))
-                {
-                    std::memcpy(&m_line_coding, m_ep0_buffer, sizeof(serial::LineCoding));
-                    if (m_source != nullptr)
-                    {
-                        m_source->set_line_coding(m_line_coding);
-                    }
-                }
-
-                if (toggle_ok)
-                {
-                    usbreg::ep0_ctrl() =
-                        usbreg::kUepRTog | usbreg::kUepTTog | usbreg::kUepRResNak | usbreg::kUepTResAck;
-                }
-                break;
-
-            case kTokenIn | 0:
-                usbreg::ep0_ctrl() = (usbreg::ep0_ctrl() & 0xFCu) | kInNak;
-                handle_ep0_in();
                 break;
 
             default:
@@ -330,7 +339,7 @@ void UsbDevice::irq_handler()
         // (ACK), otherwise the first GET_DESCRIPTOR is NAKed and enumeration
         // never starts.
         usbreg::ep0_ctrl()    = usbreg::kUepRResAck | usbreg::kUepTResNak;
-        usbreg::ep1_ctrl()    = usbreg::kUepRResAck | usbreg::kUepTResNak;
+        usbreg::ep1_ctrl()    = usbreg::kUepRResAck | usbreg::kUepTResNak | usbreg::kUepAutoTog;
         usbreg::ep2_ctrl()    = usbreg::kUepRResAck | usbreg::kUepTResNak | usbreg::kUepAutoTog;
         usbreg::ep3_ctrl()    = usbreg::kUepRResNak | usbreg::kUepTResNak | usbreg::kUepAutoTog;
         usbreg::dev_addr()    = 0;
@@ -364,7 +373,7 @@ void UsbDevice::handle_ep0_in()
         {
             usbreg::ep0_t_len() = length;
             usbreg::ep0_ctrl() ^= usbreg::kUepTTog;
-            usbreg::ep0_ctrl() &= ~0x03u;
+            usbreg::ep0_ctrl() = (usbreg::ep0_ctrl() & ~usbreg::kMaskUepTRes) | usbreg::kUepTResAck;
         }
         else
         {
@@ -375,7 +384,7 @@ void UsbDevice::handle_ep0_in()
     }
 
     case kReqSetAddress:
-        usbreg::dev_addr() = (usbreg::dev_addr() & 0x80u) | m_device_info.address;
+        usbreg::dev_addr() = (usbreg::dev_addr() & ~kDeviceAddressMask) | m_device_info.address;
         usbreg::ep0_ctrl() = usbreg::kUepRTog | usbreg::kUepTTog | usbreg::kUepRResNak | usbreg::kUepTResNak;
         break;
 
@@ -393,17 +402,29 @@ void UsbDevice::poll()
         return;
     }
 
-    if ((usbreg::ep3_ctrl() & usbreg::kMaskUepTRes) == usbreg::kUepTResNak)
+    CriticalSection guard;
+    if (!ep3_armed())
     {
-        if (m_source != nullptr)
-        {
-            const std::size_t available = m_source->read(m_ep3_buffer, sizeof(m_ep3_buffer));
-            if (available != 0)
-            {
-                usbreg::ep3_t_len() = static_cast<std::uint8_t>(available);
-                usbreg::ep3_ctrl()  = (usbreg::ep3_ctrl() & ~usbreg::kMaskUepTRes) | usbreg::kUepTResAck;
-            }
-        }
+        service_in();
+    }
+}
+
+void UsbDevice::service_in()
+{
+    std::size_t available = 0;
+    if (m_source.read != nullptr)
+    {
+        available = m_source.read(m_source.context, m_ep3_buffer, sizeof(m_ep3_buffer));
+    }
+
+    if (available != 0)
+    {
+        usbreg::ep3_t_len() = static_cast<std::uint8_t>(available);
+        usbreg::ep3_ctrl()  = (usbreg::ep3_ctrl() & ~usbreg::kMaskUepTRes) | usbreg::kUepTResAck;
+    }
+    else
+    {
+        usbreg::ep3_ctrl() = (usbreg::ep3_ctrl() & ~usbreg::kMaskUepTRes) | kInNak;
     }
 }
 
@@ -422,9 +443,14 @@ std::size_t UsbDevice::read_host(void* dst, std::size_t max_length)
     return length;
 }
 
-void UsbDevice::set_source(rf_uart::RfUart* source) noexcept
+void UsbDevice::set_source(serial::HostOutput source) noexcept
 {
     m_source = source;
+}
+
+serial::HostInput UsbDevice::host_input() noexcept
+{
+    return serial::HostInput{this, &read_host_thunk};
 }
 
 } // namespace ch572::usb
@@ -433,6 +459,9 @@ extern "C"
 {
 CH572_INTERRUPT CH572_HIGH_CODE void USB_IRQHandler(void)
 {
-    ch572::usb::UsbDevice::instance().irq_handler();
+    if (ch572::usb::g_device != nullptr)
+    {
+        ch572::usb::g_device->irq_handler();
+    }
 }
 }

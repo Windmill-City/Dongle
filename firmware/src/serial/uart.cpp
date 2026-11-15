@@ -13,6 +13,14 @@ RingBuffer<kRxBufferSize>      g_rx_buffer;
 
 inline constexpr std::size_t   kTxFifoDepth = 8;
 
+// The receive interrupt enable is the state: it is zero while the bridge is in
+// reset and while the line coding is being changed. write() checks it per byte
+// so a Reset can abort a transfer that is already in progress.
+bool enabled() noexcept
+{
+    return (uart::ier() & uart::kIerRecvReady) != 0;
+}
+
 // RB_UART_TXD = 3 selects PA0, RB_UART_RXD = 3 selects PA1.
 inline constexpr std::uint16_t kTxPinSelect = 3;
 inline constexpr std::uint16_t kRxPinSelect = 3;
@@ -76,9 +84,18 @@ std::uint8_t make_lcr(const LineCoding& coding) noexcept
     return lcr;
 }
 
+void drain_hw_rx() noexcept
+{
+    while (uart::rfc() != 0)
+    {
+        const std::uint8_t discarded = uart::rbr();
+        (void)discarded;
+    }
+}
+
 } // namespace
 
-void init(std::uint32_t baud) noexcept
+void init() noexcept
 {
     // Release the USB PHY and its pull-up so PA0/PA1 fall back to GPIO
     // alternate function.
@@ -94,12 +111,14 @@ void init(std::uint32_t baud) noexcept
     alternate       = static_cast<std::uint16_t>((alternate & ~(sysreg::kPinUartRxdMask | sysreg::kPinUartTxdMask))
                                            | (kTxPinSelect << 3) | kRxPinSelect);
 
-    set_baud(baud);
+    set_baud(kBaudRate);
 
-    // Eight data bits, one stop bit, no parity; four-byte RX FIFO trigger.
+    // Eight data bits, one stop bit, no parity. The receiver stays suspended
+    // until resume(): the slave powers up in its reset state and must not
+    // buffer serial traffic before the host has configured it.
     uart::lcr() = uart::kLcrWordSizeMask;
-    uart::fcr() = (2u << 6) | uart::kFcrFifoEnable;
-    uart::ier() = uart::kIerTxdEnable | uart::kIerRecvReady;
+    uart::fcr() = uart::kFcrFifoEnable;
+    uart::ier() = 0;
     uart::mcr() |= uart::kMcrIrqOutput;
 
     enable_irq(Irq::Uart);
@@ -107,32 +126,63 @@ void init(std::uint32_t baud) noexcept
 
 void configure(const LineCoding& coding) noexcept
 {
+    // Silence the receiver while the divisor and frame format change.
+    uart::ier() = 0;
+
     set_baud(coding.baud_rate);
     uart::lcr() = make_lcr(coding);
 
-    // Only the radio interrupt changes the line settings, and same-priority
-    // PFIC interrupts do not nest, so the receive ring cannot move while it is
-    // drained here.
+    // Drop bytes that were sampled at the previous settings.
+    drain_hw_rx();
+
+    // Callers mask interrupts around this and resume the receiver afterwards,
+    // so the receive ring cannot move while it is drained here.
     std::uint8_t scratch[32];
     while (g_rx_buffer.read(scratch, sizeof(scratch)) != 0)
     {
     }
 }
 
+void suspend() noexcept
+{
+    uart::ier() = 0;
+
+    // Discard the hardware FIFO. No software ring is touched here, so this is
+    // safe to call from the radio interrupt while the main loop is active.
+    drain_hw_rx();
+}
+
+void resume() noexcept
+{
+    uart::fcr() = uart::kFcrFifoEnable;
+    uart::ier() = uart::kIerTxdEnable | uart::kIerRecvReady;
+    uart::mcr() |= uart::kMcrIrqOutput;
+}
+
 CH572_HIGH_CODE std::size_t read(std::uint8_t* dst, std::size_t max_length) noexcept
 {
+    if (!enabled())
+    {
+        return 0;
+    }
+
     return g_rx_buffer.read(dst, max_length);
 }
 
 void write(const std::uint8_t* src, std::size_t length) noexcept
 {
-    if (src == nullptr)
+    if (src == nullptr || !enabled())
     {
         return;
     }
 
     for (std::size_t index = 0; index < length; ++index)
     {
+        if (!enabled())
+        {
+            return;
+        }
+
         while (uart::tfc() >= kTxFifoDepth)
         {
         }

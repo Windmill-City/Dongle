@@ -44,13 +44,13 @@ inline constexpr std::uint8_t  kLinkWaitTime      = static_cast<std::uint8_t>(kR
 
 // Packet header at the DMA base. The hardware takes the payload length from
 // the second byte of the first word, so `length` must stay at offset 1.
-// The low nibble of byte 0 is the sub-command and the high nibble is the
-// sequence. Direction is implicit: only the master sends requests and only the
-// slave sends responses, so no direction bit is needed.
+// Byte 0 carries the seven-bit command in the low bits and the alternating
+// one-bit sequence in bit 7. Direction is implicit: only the master sends
+// requests and only the slave sends responses.
 struct CH572_PACKED Packet
 {
-    std::uint8_t command : 4;
-    std::uint8_t sequence: 4;
+    std::uint8_t command : 7;
+    std::uint8_t sequence: 1;
     std::uint8_t length;
 };
 

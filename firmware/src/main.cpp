@@ -27,15 +27,18 @@ int                            main()
 
     gpio::pa::pull_up() &= ~kUsbDataPins;
 
-    auto&           usb = usb::UsbDevice::instance();
-    rf_uart::RfUart rf(usb, host ? rf_uart::Role::master : rf_uart::Role::slave);
+    usb::UsbDevice  usb;
+    rf_uart::RfUart rf(host ? rf_uart::Role::master : rf_uart::Role::slave);
 
     enable_global_irq();
 
     if (host)
     {
+        // Wire both directions explicitly: USB only knows the serial stream
+        // interfaces, so a test source can replace the radio bridge here.
+        usb.set_source(rf.output());
+        rf.attach(usb.host_input());
         usb.init();
-        usb.set_source(&rf);
     }
     else
     {

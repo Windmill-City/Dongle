@@ -5,13 +5,8 @@
 
 #include "ch572/compiler.hpp"
 #include "ch572/platform/registers.hpp"
-#include "ch572/serial/line_coding.hpp"
+#include "ch572/serial/uart.hpp"
 #include "ch572/util/ring_buffer.hpp"
-
-namespace ch572::rf_uart
-{
-class RfUart;
-}
 
 namespace ch572::usb
 {
@@ -20,27 +15,36 @@ namespace ch572::usb
 class UsbDevice
 {
   public:
-    static UsbDevice&    instance();
+    UsbDevice() = default;
 
     void                 init();
     void                 poll();
     CH572_HIGH_CODE void irq_handler();
-    void                 set_source(rf_uart::RfUart* source) noexcept;
+
+    // Attach the byte stream that feeds EP3 and owns the LineCoding. Keeping
+    // this as a plain interface lets the USB side run with a test source
+    // instead of the radio bridge.
+    void                 set_source(serial::HostOutput source) noexcept;
+
+    // Bytes arriving from the host, for a bridge to pull. main() wires this
+    // into whichever source was attached above.
+    serial::HostInput    host_input() noexcept;
 
     CH572_HIGH_CODE std::size_t read_host(void* dst, std::size_t max_length);
 
+    // The LineCoding is owned by the attached source; the device only answers
+    // the CDC class requests on its behalf.
     bool                        enumerated() const noexcept
     {
-        return (usbreg::dev_addr() & 0x7Fu) != 0;
+        return (usbreg::dev_addr() & kDeviceAddressMask) != 0;
     }
 
   private:
-    UsbDevice()                                  = default;
-
-    static constexpr std::size_t  kEp0Size       = 64;
-    static constexpr std::size_t  kPacketSize    = 64;
-    static constexpr std::size_t  kUsbBufferSize = 256;
-    static constexpr std::uint8_t kInNak         = 2;
+    static constexpr std::size_t  kEp0Size           = 64;
+    static constexpr std::size_t  kPacketSize        = 64;
+    static constexpr std::size_t  kUsbBufferSize     = 256;
+    static constexpr std::uint8_t kInNak             = 2;
+    static constexpr std::uint8_t kDeviceAddressMask = 0x7Fu;
 
     struct DeviceInfo
     {
@@ -52,13 +56,22 @@ class UsbDevice
     CH572_HIGH_CODE void handle_setup();
     void                 handle_ep0_in();
 
-    DeviceInfo           m_device_info;
-    std::uint8_t         m_setup_request = 0;
-    std::uint8_t         m_setup_type    = 0;
-    std::uint8_t         m_setup_length  = 0;
-    const std::uint8_t*  m_descriptor    = nullptr;
+    // Load the next packet into EP3. Runs from the IN-complete interrupt and,
+    // while the endpoint is not armed, from poll().
+    CH572_HIGH_CODE void service_in();
 
-    serial::LineCoding   m_line_coding{115200u, serial::kStopBits1, serial::kParityNone, 8};
+    // Hardware IN state: MASK_UEP_T_RES is ACK only while a packet is loaded
+    // and waiting for the host, and NAK once the buffer is free.
+    static bool          ep3_armed() noexcept
+    {
+        return (usbreg::ep3_ctrl() & usbreg::kMaskUepTRes) == usbreg::kUepTResAck;
+    }
+
+    DeviceInfo          m_device_info;
+    std::uint8_t        m_setup_request = 0;
+    std::uint8_t        m_setup_type    = 0;
+    std::uint8_t        m_setup_length  = 0;
+    const std::uint8_t* m_descriptor    = nullptr;
 
     alignas(4) std::uint8_t m_ep0_buffer[kEp0Size]{};
     alignas(4) std::uint8_t m_ep1_buffer[8]{};
@@ -66,7 +79,7 @@ class UsbDevice
     alignas(4) std::uint8_t m_ep3_buffer[kPacketSize]{};
 
     RingBuffer<kUsbBufferSize> m_rx_buffer;
-    rf_uart::RfUart*           m_source = nullptr;
+    serial::HostOutput          m_source;
 };
 
 } // namespace ch572::usb
