@@ -23,15 +23,15 @@ using radio_reg::Bb;
 using radio_reg::Lle;
 using radio_reg::RfEnd;
 
-namespace lle              = radio_reg::lle;
-namespace bb               = radio_reg::bb;
-namespace reg              = radio_reg::rfend;
+namespace lle                                    = radio_reg::lle;
+namespace bb                                     = radio_reg::bb;
+namespace reg                                    = radio_reg::rfend;
 
-ProcessCallback g_callback = nullptr;
+ProcessCallback                g_callback        = nullptr;
 
 // Receive frames are DMA'd straight into the frame the role armed, so the
 // interrupt handler never copies a payload.
-Frame*                         g_rx_frame        = nullptr;
+Frame*                         g_rx              = nullptr;
 
 // PHY properties: 2 Mbps PHY (bits 5:4 = 01), data whitening enabled.
 inline constexpr std::uint32_t kProperties       = 0x10u;
@@ -161,18 +161,18 @@ CH572_HIGH_CODE void rf_basic_process(std::uint32_t status) noexcept
         stop_lle_timer();
         if (read_crc() == 0)
         {
-            // The DMA already placed the frame in g_rx_frame, so hand it to the
+            // The DMA already placed the frame in g_rx, so hand it to the
             // role callback without touching the payload.
             g_callback(kEventRx);
         }
         else
         {
-            set_rx(g_rx_frame);
+            set_rx(g_rx);
         }
     }
     else if ((status & lle::kIrqTimer0) != 0)
     {
-        set_rx(g_rx_frame);
+        set_rx(g_rx);
     }
 }
 
@@ -322,7 +322,7 @@ void set_rx(Frame* frame) noexcept
         return;
     }
 
-    g_rx_frame              = frame;
+    g_rx                    = frame;
 
     Lle::r16(lle::WaitTime) = static_cast<std::uint16_t>(kRxWaitTime);
     if ((Lle::r32(lle::Control) & lle::kControlModeMask) != 0)
