@@ -7,9 +7,6 @@
 namespace ch572::serial
 {
 
-// CDC ACM line coding, byte-for-byte identical to the seven bytes exchanged in
-// GET_LINE_CODING / SET_LINE_CODING. Keeping the USB layout on the air avoids
-// any conversion on both ends.
 inline constexpr std::uint8_t kStopBits1   = 0;
 inline constexpr std::uint8_t kStopBits1_5 = 1;
 inline constexpr std::uint8_t kStopBits2   = 2;
@@ -30,4 +27,4 @@ struct CH572_PACKED LineCoding
 
 static_assert(sizeof(LineCoding) == 7, "line coding matches the CDC payload");
 
-} // namespace ch572::serial
+}

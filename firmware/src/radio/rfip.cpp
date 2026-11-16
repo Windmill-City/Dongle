@@ -1,17 +1,8 @@
-﻿#include "ch572/radio/rfip.hpp"
+#include "ch572/radio/rfip.hpp"
 
 #include "ch572/compiler.hpp"
 #include "ch572/platform/registers.hpp"
 #include "ch572/radio/rfend.hpp"
-
-// Register-level 2.4G radio driver.
-//
-// Every sequence below mirrors the vendor CH57x RF library instruction for
-// instruction (RFEND_DevInit, RFIP_WakeUpRegInit, RFIP_Calibration,
-// RFIP_StartTx, RFIP_SetRx, RFIP_SetPHYTxMode, RFIP_SetPHYRxMode,
-// RFIP_SetChannel and the two interrupt handlers), specialised for the fixed
-// link configuration used by this firmware: 2 Mbps PHY, whitening on,
-// channel 35, 24-bit CRC, 160 us synthesizer hold time.
 
 namespace ch572::rf
 {
@@ -29,62 +20,48 @@ namespace reg                                    = radio_reg::rfend;
 
 ProcessCallback                g_callback        = nullptr;
 
-// Receive frames are DMA'd straight into the frame the role armed, so the
-// interrupt handler never copies a payload.
 Frame*                         g_rx              = nullptr;
 
-// PHY properties: 2 Mbps PHY (bits 5:4 = 01), data whitening enabled.
 inline constexpr std::uint32_t kProperties       = 0x10u;
 
-// LLE PHY_CONTROL values for each radio state.
 inline constexpr std::uint32_t kPhyCalibration   = 0x000F05D8u;
 inline constexpr std::uint32_t kPhyTx            = 0x000F02D8u;
 inline constexpr std::uint32_t kPhyRx            = 0x000F01D8u;
 inline constexpr std::uint32_t kPhyIdle          = 0x000F0080u;
 
-// LLE wake-up configuration.
 inline constexpr std::uint32_t kBleClkGate1      = 1u << 7;
 inline constexpr std::uint32_t kBleClkGate2      = 0x13u;
 
-// BB wake-up configuration.
 inline constexpr std::uint32_t kBbRxConfig       = 64u;
 inline constexpr std::uint32_t kBbRxConfig2      = 0x2071Fu;
 
-// RFEND calibration strobes.
 inline constexpr std::uint32_t kCalEnable        = 0x00130000u;
 inline constexpr std::uint32_t kCalClear         = 0xFFCDFFFFu;
 inline constexpr std::uint32_t kTxBiasCal        = 1u << 11;
 inline constexpr std::uint32_t kControl3Cal      = 1u << 12;
 
-// BB control register holds the BLE channel index in its low seven bits.
 inline constexpr std::uint32_t kChannelMask      = 0x7Fu;
 
-// PHY receive setup for the 2 Mbps mode.
 inline constexpr std::uint32_t kBbRxControl1     = 13u;
 inline constexpr std::uint32_t kBbRxControl2     = 160u;
 inline constexpr std::uint32_t kBbRxControl2High = 127u;
 inline constexpr std::uint32_t kRxWaitTime       = 4u;
 
-// DMA header layout: the payload length occupies bits 15:8 of the first word.
 inline constexpr std::uint32_t kFrameLengthShift = 8u;
 inline constexpr std::uint32_t kFrameLengthMask  = 0xFFu;
 
-// PHY transmit timing: (length + 11) * 4 + wait/2 + 80, in 0.5 us ticks.
 inline constexpr std::uint32_t kTxLengthOverhead = 11u;
 inline constexpr std::uint32_t kTxByteTicks      = 4u;
 inline constexpr std::uint32_t kTxFixedTicks     = 80u;
 inline constexpr std::uint32_t kTxFineTuneWait   = 40u;
 
-// RX window: (length + 3) * 8 + 60, in 0.5 us ticks.
 inline constexpr std::uint32_t kRxLengthOverhead = 3u;
 inline constexpr std::uint32_t kRxByteTicks      = 8u;
 inline constexpr std::uint32_t kRxFixedTicks     = 60u;
 
-// Receive window for the largest frame this link carries.
 inline constexpr std::uint32_t kMaxRecvTime =
     (static_cast<std::uint32_t>(kMaxPacket) + kRxLengthOverhead) * kRxByteTicks + kRxFixedTicks;
 
-// Analog settle loops taken from the vendor driver.
 inline constexpr int kInitSettleLoops = 100;
 inline constexpr int kPhySettleLoops  = 40;
 
@@ -103,16 +80,12 @@ CH572_HIGH_CODE void stop_lle_timer() noexcept
     Lle::r32(lle::Irq)   = lle::kIrqTimer0;
 }
 
-// RFIP_SetChannel() for the low-frequency path used here: `kLinkFrequency` is
-// a channel index below 2.3 GHz, so the vendor driver writes it straight into
-// the BB control register and leaves the synthesizer divider registers alone.
 CH572_HIGH_CODE void program_channel() noexcept
 {
     RfEnd::r32(reg::TxControl1) &= ~reg::kTxControl1ChannelBand;
     Bb::r32(bb::Control) = (Bb::r32(bb::Control) & ~kChannelMask) | (kLinkFrequency & kChannelMask);
 }
 
-// RFIP_SetPHYTxMode(): LLE countdown covering preamble plus payload.
 CH572_HIGH_CODE void set_phy_tx_mode(const Frame* frame) noexcept
 {
     RfEnd::r32(reg::PhyConfig) =
@@ -131,7 +104,6 @@ CH572_HIGH_CODE void set_phy_tx_mode(const Frame* frame) noexcept
     Lle::r32(lle::Timer) = total;
 }
 
-// RFIP_SetPHYRxMode(): filter/ADC code for the fixed 2 Mbps receive mode.
 CH572_HIGH_CODE void set_phy_rx_mode() noexcept
 {
     Bb::r32(bb::Control) &= ~bb::kControlPhyMask;
@@ -146,8 +118,6 @@ CH572_HIGH_CODE void set_phy_rx_mode() noexcept
 
 CH572_HIGH_CODE void rf_basic_process(std::uint32_t status) noexcept
 {
-    // Only TX-done can arrive while the radio is transmitting: the countdown
-    // interrupt is masked (set_phy_tx_mode) and no reception can complete.
     if ((status & lle::kIrqTx) != 0)
     {
         stop_lle_timer();
@@ -161,8 +131,6 @@ CH572_HIGH_CODE void rf_basic_process(std::uint32_t status) noexcept
         stop_lle_timer();
         if (read_crc() == 0)
         {
-            // The DMA already placed the frame in g_rx, so hand it to the
-            // role callback without touching the payload.
             g_callback(kEventRx);
         }
         else
@@ -176,7 +144,7 @@ CH572_HIGH_CODE void rf_basic_process(std::uint32_t status) noexcept
     }
 }
 
-} // namespace
+}
 
 void init(ProcessCallback process_cb) noexcept
 {
@@ -187,8 +155,6 @@ void init(ProcessCallback process_cb) noexcept
 
     g_callback = process_cb;
 
-    // Enable the RF analog blocks (vendor RFRole_Init does this before any
-    // radio register access; without it the PA/LNA stay powered down).
     {
         sysreg::SafeAccess access;
         sysreg::misc_ctrl() = (sysreg::misc_ctrl() & ~sysreg::kRfAnalogMask) | sysreg::kRfAnalogEnable;
@@ -249,7 +215,7 @@ void calibration() noexcept
     Lle::r32(lle::PhyControl) = kPhyIdle;
 }
 
-} // namespace
+}
 
 void set_tx(Frame* frame) noexcept
 {
@@ -389,7 +355,7 @@ void bb_irq_handler() noexcept
     }
 }
 
-} // namespace ch572::rf
+}
 
 extern "C"
 {

@@ -13,21 +13,16 @@ RingBuffer<kRxBufferSize>      g_rx_buffer;
 
 inline constexpr std::size_t   kTxFifoDepth = 8;
 
-// The receive interrupt enable is the state: it is zero while the bridge is in
-// reset and while the line coding is being changed. write() checks it per byte
-// so a Reset can abort a transfer that is already in progress.
 bool enabled() noexcept
 {
     return (uart::ier() & uart::kIerRecvReady) != 0;
 }
 
-// RB_UART_TXD = 3 selects PA0, RB_UART_RXD = 3 selects PA1.
 inline constexpr std::uint16_t kTxPinSelect = 3;
 inline constexpr std::uint16_t kRxPinSelect = 3;
 
 void                           set_baud(std::uint32_t baud) noexcept
 {
-    // The divisor latch is 16 bits; reject settings the hardware cannot reach.
     if (baud < 1200u)
     {
         baud = 1200u;
@@ -58,7 +53,6 @@ std::uint8_t make_lcr(const LineCoding& coding) noexcept
         lcr |= uart::kLcrStopBits;
     }
 
-    // CH572 parity modes: 00 odd, 01 even, 10 mark, 11 space.
     switch (coding.parity)
     {
     case kParityOdd:
@@ -93,12 +87,10 @@ void drain_hw_rx() noexcept
     }
 }
 
-} // namespace
+}
 
 void init() noexcept
 {
-    // Release the USB PHY and its pull-up so PA0/PA1 fall back to GPIO
-    // alternate function.
     sysreg::pin_alternate() &= ~(sysreg::kPinUsbEnable | sysreg::kUdpPullUpEnable);
 
     gpio::pa::pull_down() &= ~(gpio::kPin0 | gpio::kPin1);
@@ -113,9 +105,6 @@ void init() noexcept
 
     set_baud(kBaudRate);
 
-    // Eight data bits, one stop bit, no parity. The receiver stays suspended
-    // until resume(): the slave powers up in its reset state and must not
-    // buffer serial traffic before the host has configured it.
     uart::lcr() = uart::kLcrWordSizeMask;
     uart::fcr() = uart::kFcrFifoEnable;
     uart::ier() = 0;
@@ -126,17 +115,13 @@ void init() noexcept
 
 void configure(const LineCoding& coding) noexcept
 {
-    // Silence the receiver while the divisor and frame format change.
     uart::ier() = 0;
 
     set_baud(coding.baud_rate);
     uart::lcr() = make_lcr(coding);
 
-    // Drop bytes that were sampled at the previous settings.
     drain_hw_rx();
 
-    // Callers mask interrupts around this and resume the receiver afterwards,
-    // so the receive ring cannot move while it is drained here.
     std::uint8_t scratch[32];
     while (g_rx_buffer.read(scratch, sizeof(scratch)) != 0)
     {
@@ -147,8 +132,6 @@ void suspend() noexcept
 {
     uart::ier() = 0;
 
-    // Discard the hardware FIFO. No software ring is touched here, so this is
-    // safe to call from the radio interrupt while the main loop is active.
     drain_hw_rx();
 }
 
@@ -183,8 +166,6 @@ std::size_t tx_space() noexcept
 
 void irq_handler() noexcept
 {
-    // Reading RBR until the FIFO is empty also clears the RX-ready and
-    // receive-timeout interrupt sources.
     std::uint8_t      buffer[kTxFifoDepth];
     const std::size_t count = uart::rfc();
     std::size_t       index = 0;
@@ -197,7 +178,7 @@ void irq_handler() noexcept
     g_rx_buffer.write(buffer, index);
 }
 
-} // namespace ch572::serial
+}
 
 extern "C"
 {

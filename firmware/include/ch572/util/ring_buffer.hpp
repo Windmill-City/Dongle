@@ -6,8 +6,6 @@
 namespace ch572
 {
 
-// The WCH core has a byte-oriented block copy instruction.  It is used here so
-// the interrupt-side ring buffer does not need to call into libc.
 inline void wch_mcpy(void* dst, const void* src, std::size_t length) noexcept
 {
     auto* d   = static_cast<std::uint8_t*>(dst);
@@ -16,19 +14,12 @@ inline void wch_mcpy(void* dst, const void* src, std::size_t length) noexcept
     asm volatile("mcpy %2, %0, %1" : "+r"(s), "+r"(d) : "r"(end) : "memory");
 }
 
-// Lock-free for one producer and one consumer only: each index is written by
-// exactly one side, the payload is copied before the index is published, and
-// the block copy's memory clobber keeps those stores ordered.  Calling write()
-// from two contexts, or read() from two contexts, still needs external
-// serialization.
 template <std::size_t N>
 class RingBuffer
 {
   public:
     static_assert(N > 0, "RingBuffer must have storage");
 
-    // N bytes of payload plus one permanently unused slot that separates the
-    // full and empty states, so no separate count is needed.
     static constexpr std::size_t capacity = N;
 
     std::size_t size() const noexcept
@@ -140,4 +131,4 @@ class RingBuffer
     volatile std::size_t m_read  = 0;
 };
 
-} // namespace ch572
+}

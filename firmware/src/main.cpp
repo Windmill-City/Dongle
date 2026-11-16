@@ -13,8 +13,6 @@ int                            main()
     sysreg::disable_watchdog_reset();
     clock::init();
 
-    // Release SWD and the USB PHY before sampling; otherwise PA0/PA1 are not
-    // GPIO and the internal pull-ups cannot reach the pads.
     sysreg::pin_alternate() &= ~(sysreg::kPinDebugEnable | sysreg::kPinUsbEnable | sysreg::kUdpPullUpEnable);
 
     gpio::pa::pull_down() &= ~kUsbDataPins;
@@ -34,8 +32,6 @@ int                            main()
 
     if (host)
     {
-        // Wire both directions explicitly: USB only knows the serial stream
-        // interfaces, so a test source can replace the radio bridge here.
         usb.set_source(rf.output());
         rf.attach(usb.host_input());
         usb.init();

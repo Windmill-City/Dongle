@@ -12,12 +12,10 @@ using radio_reg::RfEnd;
 namespace off                               = radio_reg::rfend;
 namespace lle                               = radio_reg::lle;
 
-// The LLE countdown timer runs at 2 MHz on CH570/CH572.
 constexpr std::uint32_t kTimerTicksPerUs    = 2;
 constexpr std::uint32_t kFilterTimeoutTicks = 50 * kTimerTicksPerUs;
 constexpr std::uint32_t kTuneTimeoutTicks   = 4000u * kTimerTicksPerUs;
 
-// Vendor tuning points: 2401, 2480 and 2440 MHz.
 constexpr std::uint16_t kTuneCycle2401      = 191;
 constexpr std::uint16_t kTuneCycle2480      = 231;
 constexpr std::uint16_t kTuneCycle2440      = 211;
@@ -28,17 +26,15 @@ struct TxTunePoint
     std::uint8_t nga;
 };
 
-// RISC-V "div" returns -1 on a zero divisor; keep the same behaviour here.
 std::int32_t divide(std::int32_t numerator, std::int32_t denominator) noexcept
 {
     return denominator == 0 ? -1 : numerator / denominator;
 }
 
-} // namespace
+}
 
 void init() noexcept
 {
-    // Mirrors the vendor RFEND_DevInit() bit by bit.
     RfEnd::r32(off::TxBias) = 1152;
     RfEnd::r32(off::Power)  = (RfEnd::r32(off::Power) & 0xFFFF0FFFu) | 0x00008000u;
     RfEnd::r32(off::TxControl1) = (RfEnd::r32(off::TxControl1) & 0xFFFFCFFFu) | 0x00001000u;
@@ -245,7 +241,7 @@ void tx_ctune() noexcept
         (RfEnd::r32(off::DacRef) & 0x80FFFFFFu) | (static_cast<std::uint32_t>(p2440.nga) << off::kDacRefGaShift);
 }
 
-} // namespace
+}
 
 void calibration() noexcept
 {
@@ -255,4 +251,4 @@ void calibration() noexcept
     rx_adc();
 }
 
-} // namespace ch572::rfend
+}

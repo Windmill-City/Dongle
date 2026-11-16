@@ -13,20 +13,14 @@ namespace ch572::usb
 namespace
 {
 
-// CDC ACM class requests.
 constexpr std::uint8_t kCdcSetLineCoding  = 0x20;
 constexpr std::uint8_t kCdcGetLineCoding  = 0x21;
 
 constexpr std::uint8_t kStall             = 0xFF;
 constexpr std::uint8_t kTokenEndpointMask = usbreg::kMaskUisToken | usbreg::kMaskUisEndpoint;
 
-// The interrupt entry point is a plain C function with no context argument, so
-// init() publishes the device the same way the radio bridge publishes its
-// instance.
 UsbDevice*             g_device           = nullptr;
 
-// Used until a source supplies its own coding, so the CDC interface still
-// answers enumeration and can be exercised without a bridge attached.
 constexpr serial::LineCoding kDefaultCoding{115200u, serial::kStopBits1, serial::kParityNone, 8};
 
 std::size_t            read_host_thunk(void* context, void* dst, std::size_t max_length) noexcept
@@ -34,7 +28,7 @@ std::size_t            read_host_thunk(void* context, void* dst, std::size_t max
     return static_cast<UsbDevice*>(context)->read_host(dst, max_length);
 }
 
-} // namespace
+}
 
 void UsbDevice::init()
 {
@@ -48,9 +42,6 @@ void UsbDevice::endpoint_init()
 {
     usbreg::ctrl()      = 0;
 
-    // EP1 is the CDC ACM notification endpoint, EP2 receives the CDC data and
-    // EP3 sends it. Separating the data endpoints gives TX and RX their own
-    // 64-byte buffers instead of sharing the EP2 buffer pair.
     usbreg::ep4_1_mod() = usbreg::kUep1TxEn;
     usbreg::ep2_3_mod() = usbreg::kUep2RxEn | usbreg::kUep3TxEn;
 
@@ -59,9 +50,6 @@ void UsbDevice::endpoint_init()
     usbreg::ep2_dma()   = static_cast<std::uint16_t>(reinterpret_cast<std::uintptr_t>(&m_ep2_buffer[0]));
     usbreg::ep3_dma()   = static_cast<std::uint16_t>(reinterpret_cast<std::uintptr_t>(&m_ep3_buffer[0]));
 
-    // EP0 must receive (ACK) so the host's first SETUP (GET_DESCRIPTOR) is
-    // accepted. With RX=NAK the packet is rejected and enumeration never
-    // starts.
     usbreg::ep0_ctrl()  = usbreg::kUepRResAck | usbreg::kUepTResNak;
     usbreg::ep1_ctrl()  = usbreg::kUepRResAck | usbreg::kUepTResNak | usbreg::kUepAutoTog;
     usbreg::ep2_ctrl()  = usbreg::kUepRResAck | usbreg::kUepTResNak | usbreg::kUepAutoTog;
@@ -116,8 +104,6 @@ void UsbDevice::handle_setup()
                 descriptor_length = descriptor[0];
                 if (type == kDescriptorConfig && descriptor[0] >= 4)
                 {
-                    // For a configuration descriptor bLength is only the 9-byte
-                    // header; the full size is wTotalLength.
                     descriptor_length = static_cast<std::uint16_t>(descriptor[2] | (descriptor[3] << 8));
                 }
                 if (descriptor_length > 255)
@@ -326,18 +312,12 @@ void UsbDevice::irq_handler()
 
         if ((usbreg::int_st() & usbreg::kUisSetupAct) != 0)
         {
-            // Handle the setup packet immediately in the ISR. Deferring it to
-            // poll() (which runs from flash) delays the descriptor reply past
-            // the host's enumeration timeout.
             handle_setup();
             usbreg::int_fg() = usbreg::kUifTransfer;
         }
     }
     else if ((usbreg::int_fg() & usbreg::kUifBusReset) != 0)
     {
-        // After a bus reset EP0 must be ready to receive the host's SETUP
-        // (ACK), otherwise the first GET_DESCRIPTOR is NAKed and enumeration
-        // never starts.
         usbreg::ep0_ctrl()    = usbreg::kUepRResAck | usbreg::kUepTResNak;
         usbreg::ep1_ctrl()    = usbreg::kUepRResAck | usbreg::kUepTResNak | usbreg::kUepAutoTog;
         usbreg::ep2_ctrl()    = usbreg::kUepRResAck | usbreg::kUepTResNak | usbreg::kUepAutoTog;
@@ -453,7 +433,7 @@ serial::HostInput UsbDevice::host_input() noexcept
     return serial::HostInput{this, &read_host_thunk};
 }
 
-} // namespace ch572::usb
+}
 
 extern "C"
 {

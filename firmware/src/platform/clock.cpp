@@ -49,14 +49,11 @@ CH572_HIGH_CODE void init() noexcept
         sysreg::SafeAccess access;
         sysreg::sleep_power_ctrl() |= kPowerPlanEnable;
         sysreg::clock_sys_cfg() = kPll;
-        // 7,7 trims from the CH570Q SetSysClock().
         sysreg::misc_ctrl() |= (7u << 3) | (7u << 6);
     }
 
-    // Start the free-running SysTick used by the delay/timeout helpers. It
-    // runs from HCLK/8, so it must start after the PLL is selected.
     systick::now()  = 0;
     systick::ctrl() = systick::kCtrlEnable;
 }
 
-} // namespace ch572::clock
+}

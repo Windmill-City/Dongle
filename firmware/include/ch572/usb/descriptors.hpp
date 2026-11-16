@@ -16,8 +16,6 @@ inline constexpr std::uint16_t kProductId          = 0x5720;
 inline constexpr std::uint8_t  kCdcInterface       = 0;
 inline constexpr std::uint8_t  kCdcDataInterface   = 1;
 
-// No string descriptors: the host uses the default names. This saves the
-// descriptor table and the string lookup path.
 inline constexpr std::uint8_t  kDeviceDescriptor[] = {
     0x12,
     0x01,
@@ -39,7 +37,6 @@ inline constexpr std::uint8_t  kDeviceDescriptor[] = {
     0x01,
 };
 
-// CDC ACM only: one communication interface and one data interface.
 inline constexpr std::uint8_t kConfigDescriptor[] = {
     0x09, 0x02, 0x4B, 0x00, 0x02, 0x01, 0x00, 0x80, 0x32,
 
@@ -58,4 +55,4 @@ inline constexpr DescriptorSet kDescriptors = {
     kConfigDescriptor,
 };
 
-} // namespace ch572::usb
+}
