@@ -85,6 +85,18 @@ serial::LineCoding RfUart::coding() const noexcept
 
 void RfUart::poll() noexcept
 {
+    // Update the local flow-control state with hysteresis before any frame is
+    // built, so a filling receive ring is advertised before the peer adds more.
+    const std::size_t queued = m_rf_buffer.size();
+    if (queued >= kRfHighWater)
+    {
+        m_local_busy = true;
+    }
+    else if (queued <= kRfLowWater)
+    {
+        m_local_busy = false;
+    }
+
     if (m_role != Role::slave)
     {
         // poll() runs in the main loop while the radio state is also touched by
@@ -119,24 +131,13 @@ void RfUart::poll() noexcept
         return;
     }
 
-    // Drain the host->slave ring before a pending line coding is applied.
-    // While inactive the bytes are discarded, so nothing received before a
-    // Reset can reach the UART after it has been configured.
-    std::uint8_t buffer[rf::kMaxPayload];
-    std::size_t  length = 0;
-    while ((length = read_radio_buffer(m_rf_buffer, buffer, sizeof(buffer))) != 0)
-    {
-        if (!m_coding_pending)
-        {
-            serial::write(buffer, length);
-        }
-    }
-
-    // Answer a received request from the main loop rather than the RX
-    // interrupt, and hold off briefly so the master has already re-armed RX by
-    // the time this ACK is transmitted. A coding is applied right before its
-    // ACK, so nothing moves under the old setting; a pending state left by
-    // power-on has no request behind it and keeps the slave inactive.
+    // Answer a received request before moving any host->slave bytes: those are
+    // already buffered in m_rf_buffer, so the acknowledgement no longer waits
+    // for the UART transmitter. A coding is applied right before its ACK, so
+    // nothing moves under the old setting; a pending state left by power-on has
+    // no request behind it and keeps the slave inactive. The reply payload is
+    // read here, not in the interrupt, so the radio ISR stays short enough for
+    // the UART receiver FIFO at high line rates.
     if (m_turn_pending && systick::expired(m_tx_after))
     {
         CriticalSection guard;
@@ -144,8 +145,35 @@ void RfUart::poll() noexcept
         {
             slave_apply_line_coding();
         }
-        m_turn_pending = false;
+        if (m_reply_needs_data)
+        {
+            m_tx.packet.length = static_cast<std::uint8_t>(serial::read(m_tx.payload, rf::kMaxPayload));
+            m_reply_needs_data = false;
+        }
+        m_tx.packet.busy = m_local_busy;
+        m_turn_pending   = false;
         rf::set_tx(&m_tx);
+    }
+
+    // Feed the UART FIFO with only as much as it can take right now. A blocking
+    // write here would delay the next acknowledgement past the master's ACK
+    // timeout again. m_rf_buffer is the transmit queue; the busy bit throttles
+    // the peer when it backs up.
+    std::uint8_t buffer[8];
+    std::size_t  space = serial::tx_space();
+    while (space != 0)
+    {
+        const std::size_t chunk  = space < sizeof(buffer) ? space : sizeof(buffer);
+        const std::size_t length = read_radio_buffer(m_rf_buffer, buffer, chunk);
+        if (length == 0)
+        {
+            break;
+        }
+        if (!m_coding_pending)
+        {
+            serial::write(buffer, length);
+            space -= length;
+        }
     }
 }
 
@@ -178,6 +206,7 @@ void RfUart::master_build_request() noexcept
 {
     auto& out    = m_tx.packet;
     out.sequence = m_seq;
+    out.busy     = m_local_busy;
 
     if (m_coding_pending)
     {
@@ -192,8 +221,11 @@ void RfUart::master_build_request() noexcept
         return;
     }
 
+    // The peer asked for empty frames: leave the host bytes queued in the USB
+    // ring instead of pushing them into a receive ring that is already full.
     const std::size_t length =
-        m_host.read != nullptr ? m_host.read(m_host.context, m_tx.payload, rf::kMaxPayload) : 0;
+        (!m_peer_busy && m_host.read != nullptr) ? m_host.read(m_host.context, m_tx.payload, rf::kMaxPayload)
+                                                 : 0;
 
     out.command = kCommandData;
     out.length  = static_cast<std::uint8_t>(length);
@@ -222,6 +254,7 @@ void RfUart::master_process_response(rf::Packet* packet) noexcept
         // Reset, so the next request must carry the coding. This re-sends the
         // coding the master already knows, bringing the slave back up without
         // a host-side action.
+        m_peer_busy      = packet->busy;
         m_turn_pending   = false;
         m_seq            = !m_seq;
         m_coding_pending = true;
@@ -235,12 +268,23 @@ void RfUart::master_process_response(rf::Packet* packet) noexcept
         return;
     }
 
+    m_peer_busy = packet->busy;
+
     if (m_tx.packet.command == kCommandData && packet->length != 0)
     {
         // The ring is filled here (radio interrupt) and drained by the USB
         // interrupt; its free-space check must not straddle both contexts.
         CriticalSection guard;
-        (void)m_rf_buffer.write(packet + 1, packet->length);
+        if (m_rf_buffer.write(packet + 1, packet->length) != packet->length)
+        {
+            // No room for the whole payload. Keep the turn outstanding and
+            // force an immediate retransmit of the same request once the ring
+            // has drained; acknowledging and advancing here would lose up to
+            // 240 bytes with no way for the slave to resend them.
+            m_ack_deadline = systick::now();
+            rf::set_rx(&m_rx);
+            return;
+        }
     }
 
     m_turn_pending = false;
@@ -254,6 +298,11 @@ void RfUart::slave_process_request(rf::Packet* packet) noexcept
     const std::uint8_t command  = packet->command;
     const bool         sequence = packet->sequence;
     const std::uint8_t length   = packet->length;
+
+    // The request carries the master's receive-buffer state: when set, this
+    // reply must not take new bytes out of the UART ring, and they stay queued
+    // for a later turn.
+    m_peer_busy = packet->busy;
 
     if (command == kCommandReset)
     {
@@ -274,6 +323,8 @@ void RfUart::slave_process_request(rf::Packet* packet) noexcept
         m_tx.packet.command  = kCommandReset;
         m_tx.packet.sequence = sequence;
         m_tx.packet.length   = 0;
+        m_tx.packet.busy     = m_local_busy;
+        m_reply_needs_data   = false;
         slave_schedule_reply();
         return;
     }
@@ -281,19 +332,18 @@ void RfUart::slave_process_request(rf::Packet* packet) noexcept
     if (!m_coding_pending && sequence == m_seq)
     {
         // Rule 6: a duplicate request replays the ACK still held in m_tx
-        // without consuming serial data.
+        // without consuming serial data. Only the flow-control bit is
+        // refreshed; the payload still has to be the one the master missed.
+        m_tx.packet.busy = m_local_busy;
         slave_schedule_reply();
         return;
     }
 
-    // Rule 7: a new sequence consumes exactly one frame in each direction.
-    // While inactive there is no valid last sequence, so each request is new
-    // and is answered with Reset below.
-    m_seq = sequence;
-
     m_tx.packet.command  = command;
     m_tx.packet.sequence = sequence;
     m_tx.packet.length   = 0;
+    m_tx.packet.busy     = m_local_busy;
+    m_reply_needs_data   = false;
 
     if (command == kCommandData)
     {
@@ -308,14 +358,28 @@ void RfUart::slave_process_request(rf::Packet* packet) noexcept
             if (length != 0)
             {
                 CriticalSection guard;
-                (void)m_rf_buffer.write(packet + 1, length);
+                if (m_rf_buffer.write(packet + 1, length) != length)
+                {
+                    // The host ring is full, so this request cannot be
+                    // accepted. Leave the sequence unchanged and send no
+                    // reply: the master retransmits the same request after its
+                    // ACK timeout and the payload is retried instead of being
+                    // silently dropped here.
+                    return;
+                }
             }
 
-            const std::size_t reply_length = serial::read(m_tx.payload, rf::kMaxPayload);
-            m_tx.packet.length             = static_cast<std::uint8_t>(reply_length);
+            // Built in poll(), after the radio interrupt has returned. Skipped
+            // while the master advertises a full receive ring so its data stays
+            // in our UART ring instead of being discarded on arrival.
+            m_reply_needs_data = !m_peer_busy;
         }
     }
 
+    // Rule 7: a new sequence consumes exactly one frame in each direction.
+    // While inactive there is no valid last sequence, so each request is new
+    // and is answered with Reset above.
+    m_seq = sequence;
     slave_schedule_reply();
 }
 
@@ -340,6 +404,13 @@ void RfUart::slave_apply_line_coding() noexcept
 
     serial::configure(coding);
     serial::resume();
+
+    // Host->slave bytes buffered while the coding was pending belong to the old
+    // configuration; drop them instead of forwarding them under the new one.
+    std::uint8_t discard[32];
+    while (read_radio_buffer(m_rf_buffer, discard, sizeof(discard)) != 0)
+    {
+    }
 }
 
 std::size_t RfUart::read(std::uint8_t* dst, std::size_t max_length) noexcept

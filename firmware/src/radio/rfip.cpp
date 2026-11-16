@@ -1,7 +1,5 @@
 ﻿#include "ch572/radio/rfip.hpp"
 
-#include <cstring>
-
 #include "ch572/compiler.hpp"
 #include "ch572/platform/registers.hpp"
 #include "ch572/radio/rfend.hpp"
@@ -31,10 +29,8 @@ namespace reg              = radio_reg::rfend;
 
 ProcessCallback g_callback = nullptr;
 
-// The hardware writes one frame plus trailing CRC/status bytes into this
-// buffer; the usable part is copied into the caller's frame on RX.
-alignas(4) std::uint8_t g_rx_dma[264];
-
+// Receive frames are DMA'd straight into the frame the role armed, so the
+// interrupt handler never copies a payload.
 Frame*                         g_rx_frame        = nullptr;
 
 // PHY properties: 2 Mbps PHY (bits 5:4 = 01), data whitening enabled.
@@ -165,7 +161,8 @@ CH572_HIGH_CODE void rf_basic_process(std::uint32_t status) noexcept
         stop_lle_timer();
         if (read_crc() == 0)
         {
-            std::memcpy(g_rx_frame, g_rx_dma, sizeof(Frame));
+            // The DMA already placed the frame in g_rx_frame, so hand it to the
+            // role callback without touching the payload.
             g_callback(kEventRx);
         }
         else
@@ -360,7 +357,7 @@ void set_rx(Frame* frame) noexcept
     Bb::r32(bb::RxCrcInit)         = kLinkCrcInit;
     Bb::r32(bb::RxCrcPoly) = (Bb::r32(bb::RxCrcPoly) & bb::kCrcPolyHighMask) | (kLinkCrcPoly & bb::kCrcPolyLowMask);
 
-    Lle::r32(lle::RxDma)   = reinterpret_cast<std::uint32_t>(g_rx_dma);
+    Lle::r32(lle::RxDma)   = reinterpret_cast<std::uint32_t>(frame);
     Lle::r32(lle::Timer)   = 0;
     Lle::r32(lle::Irq)     = lle::kIrqTimer0;
 

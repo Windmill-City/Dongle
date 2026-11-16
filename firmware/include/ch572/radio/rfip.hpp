@@ -43,12 +43,17 @@ inline constexpr std::uint8_t  kLinkWaitTime      = static_cast<std::uint8_t>(kR
 
 // Packet header at the DMA base. The hardware takes the payload length from
 // the second byte of the first word, so `length` must stay at offset 1.
-// Byte 0 carries the seven-bit command in the low bits and the alternating
-// one-bit sequence in bit 7. Direction is implicit: only the master sends
-// requests and only the slave sends responses.
+// Byte 0 carries the six-bit command in the low bits, one flow-control bit and
+// the alternating one-bit sequence. Direction is implicit: only the master
+// sends requests and only the slave sends responses.
+//
+// The flow-control bit means "my receive buffer is above its high-water mark":
+// the peer must answer with an empty payload (length 0) until a later frame
+// clears it, so a full ring can never silently discard a whole frame.
 struct CH572_PACKED Packet
 {
-    std::uint8_t command : 7;
+    std::uint8_t command : 6;
+    std::uint8_t busy    : 1;
     std::uint8_t sequence: 1;
     std::uint8_t length;
 };
@@ -59,16 +64,21 @@ inline constexpr std::size_t  kMaxPayload = 240;
 inline constexpr std::uint8_t kMaxPacket  = static_cast<std::uint8_t>(kMaxPayload + sizeof(Packet));
 
 // One DMA frame: packet header followed by the payload. TX and RX share the
-// layout; on RX only bytes up to packet.length are valid.
+// layout; on RX only bytes up to packet.length are valid. The radio writes the
+// header, payload and its trailing CRC/status bytes straight into this buffer,
+// so it is sized like the vendor RxBuf. Receiving directly into the frame keeps
+// the interrupt path free of payload copies.
+inline constexpr std::size_t kDmaFrameSize = 264;
+
 struct alignas(4) Frame
 {
     Packet       packet;
-    std::uint8_t payload[kMaxPayload];
+    std::uint8_t payload[kDmaFrameSize - sizeof(Packet)];
 };
 
 static_assert(offsetof(Frame, payload) == sizeof(Packet), "RF payload is contiguous");
 static_assert(sizeof(Frame) >= sizeof(Packet) + kMaxPayload, "RF frame holds header plus payload");
-static_assert(sizeof(Frame) % 4 == 0, "RF frame keeps the DMA base aligned");
+static_assert(sizeof(Frame) == kDmaFrameSize, "RF frame matches the receive DMA footprint");
 
 void                 init(ProcessCallback process_cb) noexcept;
 

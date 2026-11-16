@@ -175,6 +175,12 @@ void write(const std::uint8_t* src, std::size_t length) noexcept
     }
 }
 
+std::size_t tx_space() noexcept
+{
+    const std::uint8_t queued = uart::tfc();
+    return queued >= kTxFifoDepth ? 0 : kTxFifoDepth - queued;
+}
+
 void irq_handler() noexcept
 {
     // Reading RBR until the FIFO is empty also clears the RX-ready and

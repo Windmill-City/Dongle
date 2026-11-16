@@ -15,6 +15,13 @@ namespace ch572::rf_uart
 
 inline constexpr std::size_t kRfBufferSize = 2048;
 
+// Flow-control water marks for the radio receive ring. While it is above the
+// high mark the local frame advertises busy, so the peer stops adding payload;
+// it is only cleared once the ring has drained below the low mark, which keeps
+// the bit from toggling on every frame.
+inline constexpr std::size_t kRfHighWater = (kRfBufferSize * 3) / 4;
+inline constexpr std::size_t kRfLowWater  = kRfBufferSize / 4;
+
 enum class Role : std::uint8_t
 {
     master,
@@ -97,6 +104,20 @@ class RfUart final
     // pending from power-on until a Reset carries a coding.
     serial::LineCoding          m_coding{115200u, serial::kStopBits1, serial::kParityNone, 8};
     volatile bool               m_coding_pending = true;
+
+    // Slave: the pending reply still has to take its payload from the UART ring.
+    // The read runs in poll() with the transmitter, not in the radio interrupt,
+    // so a 240-byte copy cannot extend the interrupt-off window that the UART
+    // receiver FIFO depends on. Cleared once the payload has been built, so a
+    // duplicate request replays the same bytes instead of consuming new ones.
+    volatile bool               m_reply_needs_data = false;
+
+    // Flow control. m_local_busy is our receive ring above kRfHighWater and is
+    // advertised in every outgoing frame; m_peer_busy is the last valid value
+    // received from the peer and suppresses the payload we would otherwise add
+    // to the next frame.
+    volatile bool               m_local_busy = false;
+    volatile bool               m_peer_busy  = false;
 };
 
 } // namespace ch572::rf_uart
