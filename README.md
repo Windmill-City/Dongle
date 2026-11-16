@@ -52,7 +52,13 @@ Dongle 是一块 USB-A 公头形态的无线串口模块，与 [Flasher](https:/
 | PCB | 11.5 × 16.4 mm，2 层，0.8 mm 厚 |
 
 <p align="center">
-  <img src="docs/images/board-top.png" alt="Dongle PCB top view" width="42%">
+  <img src="docs/images/board-top.png" alt="Dongle PCB top view" width="36%">
+  &nbsp;&nbsp;
+  <img src="docs/images/board-bottom.png" alt="Dongle PCB bottom view" width="36%">
+</p>
+
+<p align="center">
+  左：正面（CH570Q、晶振、天线）　右：背面（USB-A 4P 触点）
 </p>
 
 ## 构建
@@ -136,6 +142,10 @@ kicad-cli pcb render --width 1600 --height 1000 --quality high \
 kicad-cli pcb render --width 1200 --height 1500 --quality high \
   --side top --background transparent --floor --perspective \
   -o docs/images/board-top.png Dongle.kicad_pcb
+
+kicad-cli pcb render --width 1200 --height 1500 --quality high \
+  --side bottom --background transparent --floor --perspective \
+  -o docs/images/board-bottom.png Dongle.kicad_pcb
 ```
 
 `production/Dongle-1.1.zip` 为可直接送厂的 Gerber，BOM、坐标文件与 IPC 网表位于同一目录。
