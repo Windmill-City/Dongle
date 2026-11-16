@@ -11,7 +11,7 @@
 // RFIP_StartTx, RFIP_SetRx, RFIP_SetPHYTxMode, RFIP_SetPHYRxMode,
 // RFIP_SetChannel and the two interrupt handlers), specialised for the fixed
 // link configuration used by this firmware: 2 Mbps PHY, whitening on,
-// channel 17, 24-bit CRC, 160 us synthesizer hold time.
+// channel 35, 24-bit CRC, 160 us synthesizer hold time.
 
 namespace ch572::rf
 {

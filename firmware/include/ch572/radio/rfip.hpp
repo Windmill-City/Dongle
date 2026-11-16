@@ -33,7 +33,7 @@ inline constexpr std::uint8_t  kTxPower5Dbm       = 0x25;
 inline constexpr std::uint8_t  kTxPower6Dbm       = 0x2D;
 
 // Fixed link configuration for the transparent UART bridge.
-inline constexpr std::uint32_t kLinkFrequency     = 17;
+inline constexpr std::uint32_t kLinkFrequency     = 35;
 inline constexpr std::uint32_t kLinkAccessAddress = 0x57250425u;
 inline constexpr std::uint32_t kLinkCrcInit       = 0x555555u;
 inline constexpr std::uint32_t kLinkCrcPoly       = 0x80032Du;
